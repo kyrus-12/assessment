@@ -33,6 +33,7 @@ function saveData() {
     try {
         fs.writeFileSync(DB_PATH, JSON.stringify(questionBank, null, 2));
         fs.writeFileSync(RESULTS_PATH, JSON.stringify(studentResults, null, 2));
+        console.log("Data successfully synced to JSON files."); // Log this to verify
     } catch (err) {
         console.error("Critical: Data Save Error:", err);
     }
@@ -73,6 +74,15 @@ io.on('connection', (socket) => {
         saveData();
         io.emit('updateQuestions', questionBank);
     });
+
+    socket.on('adminLogin', (data) => {
+    const { name, pass } = data;
+    if (ADMIN_CREDENTIALS[name.toLowerCase()] === pass) {
+        socket.emit('loginSuccess', 'editorView');
+    } else {
+        socket.emit('loginError', 'Incorrect Admin Password.');
+    }
+});
 
     // --- RESULTS MANAGEMENT ---
     socket.on('submitExam', (result) => {
