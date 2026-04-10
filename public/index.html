@@ -175,6 +175,11 @@
 
 <script>
     const socket = io();
+    const ADMIN_CREDENTIALS = {
+        "admin": "1234",
+        "teacher1": "pass567",
+        "john": "renz2026"
+    };
     let questionBank = [];
     let savedRecords = {};
     let activeSession = null;
@@ -222,24 +227,40 @@
     });
 
     function handleAuth() {
-        const name = document.getElementById('loginName').value.trim();
+        const nameInput = document.getElementById('loginName').value.trim();
         const section = document.getElementById('loginSection').value.trim();
         const pass = document.getElementById('loginPass').value.trim();
         
-        // Admin Login
-        if (!name && pass === "1234") { showView('editorView'); return; }
-        
-        // Student Login
-        if (name && section && pass) {
-            let set = questionBank.filter(q => q.pass === pass);
-            if (set.length > 0) {
-                // Attach original index to keep track of item numbers during shuffle
-                let setWithOriginalOrder = set.map((q, idx) => ({ ...q, originalIdx: idx + 1 }));
-                setWithOriginalOrder = shuffle(setWithOriginalOrder).map(q => ({ ...q, options: shuffle(q.options) }));
-                initiateExam(name, section, setWithOriginalOrder);
+        const nameLower = nameInput.toLowerCase();
+
+        // 1. ADMIN CHECK
+        if (ADMIN_CREDENTIALS[nameLower]) { 
+            if (ADMIN_CREDENTIALS[nameLower] === pass) {
+                showView('editorView'); 
+                return; 
+            } else {
+                alert("Incorrect Admin Password.");
+                return;
             }
-            else alert("Exam not found or wrong password.");
-        } else alert("Please fill in Name, Section, and Password.");
+        }
+        
+        // 2. STUDENT CHECK
+        if (nameInput && section && pass) {
+            let set = questionBank.filter(q => q.pass === pass);
+            
+            if (set.length > 0) {
+                let setWithOriginalOrder = set.map((q, idx) => ({ ...q, originalIdx: idx + 1 }));
+                setWithOriginalOrder = shuffle(setWithOriginalOrder).map(q => ({ 
+                    ...q, 
+                    options: shuffle(q.options) 
+                }));
+                initiateExam(nameInput, section, setWithOriginalOrder);
+            } else {
+                alert("Exam not found or wrong password.");
+            }
+        } else {
+            alert("Please fill in Name, Section, and Password.");
+        }
     }
 
     function initiateExam(name, section, set) {
