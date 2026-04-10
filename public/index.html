@@ -13,7 +13,7 @@
             --text-main: #f8fafc; --text-dim: #94a3b8; --accent: #22d3ee;
             --success: #10b981; --error: #ef4444; --border: #334155;
         }
-        body { margin: 0; font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text-main); }
+        body { margin: 0; font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text-main); overflow-x: hidden; }
         .app-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         .hidden { display: none !important; }
         .glass-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; }
@@ -22,19 +22,31 @@
         .btn-danger { background: var(--error); color: white; }
         .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
         input, select, textarea { background: #0f172a; border: 1px solid var(--border); border-radius: 6px; color: white; padding: 12px; width: 100%; margin-bottom: 12px; box-sizing: border-box; }
-        .analytics-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        
+        /* Fixed Table for long content */
+        .analytics-table { width: 100%; border-collapse: collapse; margin-top: 15px; table-layout: fixed; }
         .analytics-table th { background: rgba(255,255,255,0.05); text-align: left; padding: 12px; color: var(--accent); border-bottom: 2px solid var(--border); }
-        .analytics-table td { padding: 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+        .analytics-table td { padding: 12px; border-bottom: 1px solid var(--border); font-size: 0.85rem; word-wrap: break-word; vertical-align: top; }
+        
         .option-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
         .option-card { background: rgba(255,255,255,0.03); border: 1px solid var(--border); padding: 15px; border-radius: 10px; cursor: pointer; }
         .option-card.selected { border-color: var(--accent); background: rgba(34, 211, 238, 0.1); }
-        .folder-btn { display: block; width: 100%; text-align: left; padding: 12px; background: #0f172a; margin-bottom: 8px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; color: var(--accent); font-weight: 600; }
-        .admin-q-item { background: rgba(0,0,0,0.2); padding: 15px; border-radius: 6px; margin-bottom: 12px; border: 1px solid var(--border); }
-        .admin-choices-list { font-size: 0.8rem; color: var(--text-dim); margin: 8px 0; }
-        .admin-correct-ans { font-size: 0.8rem; color: var(--success); font-weight: bold; border-top: 1px solid var(--border); padding-top: 5px; }
+        
+        .folder-wrapper { display: flex; align-items: center; gap: 5px; margin-bottom: 8px; }
+        .folder-btn { flex-grow: 1; text-align: left; padding: 12px; background: #0f172a; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; color: var(--accent); font-weight: 600; }
+        
+        .q-img { max-width: 100%; border-radius: 8px; margin: 10px 0; display: block; border: 1px solid var(--border); }
+        
+        #fs-overlay { position: fixed; inset: 0; background: var(--error); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
     </style>
 </head>
 <body>
+
+<div id="fs-overlay" class="hidden">
+    <h1 style="font-size: 3rem;">⚠️ WARNING</h1>
+    <p style="font-size: 1.5rem;">Illegal Exit Detected. Access to exam is locked.</p>
+    <button class="btn btn-primary" style="background: white; color: var(--error); padding: 20px 40px; font-size: 1.2rem;" onclick="goFullScreen()">RETURN TO FULLSCREEN</button>
+</div>
 
 <div class="app-container">
     <div id="setupView">
@@ -58,9 +70,10 @@
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:30px; margin-top:20px;">
                 <div>
                     <h3>Create Questions</h3>
-                    <input id="qSetName" placeholder="Set Name">
+                    <input id="qSetName" placeholder="Set Name (e.g. Midterm)">
                     <input id="qSetPass" placeholder="Set Password">
-                    <textarea id="qText" rows="2" placeholder="Question Text"></textarea>
+                    <input id="qSetTime" type="number" placeholder="Time for THIS Set (Minutes)" value="30">
+                    <textarea id="qText" rows="2" placeholder="Question Text or Imgur Link"></textarea>
                     <textarea id="qOptions" rows="3" placeholder="Choices (one per line)"></textarea>
                     <input id="qAnswer" placeholder="Correct Answer">
                     <button class="btn btn-primary" style="width:100%" onclick="saveQuestion()">Broadcast Question</button>
@@ -76,7 +89,7 @@
     <div id="examView" class="hidden">
         <div class="glass-card" style="position:sticky; top:10px; z-index:100; display:flex; justify-content:space-between; align-items:center;">
             <div><b id="dispStudentName"></b> | <span id="dispSetName"></span></div>
-            <div id="timer" style="font-size:1.6rem; color:var(--error); font-family:'JetBrains Mono'; font-weight:bold;">30:00</div>
+            <div id="timer" style="font-size:1.6rem; color:var(--error); font-family:'JetBrains Mono'; font-weight:bold;">00:00</div>
         </div>
         <div id="renderArea"></div>
         <button class="btn btn-primary" style="width:100%; padding:20px;" onclick="submitExam()">Submit Final Answers</button>
@@ -93,7 +106,13 @@
                 <div>
                     <h3 id="viewingSetLabel">Select a set</h3>
                     <table class="analytics-table">
-                        <thead><tr><th>Name</th><th>Score</th><th>Wrong</th><th>Time</th><th>Exits</th></tr></thead>
+                        <thead><tr>
+                            <th style="width:25%">Name</th>
+                            <th style="width:15%">Score</th>
+                            <th style="width:30%">Wrong (Q#)</th>
+                            <th style="width:15%">Time</th>
+                            <th style="width:15%">Exits</th>
+                        </tr></thead>
                         <tbody id="recordsTableBody"></tbody>
                     </table>
                 </div>
@@ -120,7 +139,6 @@
     let userChoices = {};
     let activeFolder = "";
 
-    // REAL-TIME SYNC
     socket.on('initData', (data) => {
         questionBank = data.questionBank;
         savedRecords = data.studentResults;
@@ -134,7 +152,21 @@
 
     socket.on('updateResults', (data) => {
         savedRecords = data;
+        renderFolderList();
         if (activeFolder) loadFolder(activeFolder);
+    });
+
+    function goFullScreen() {
+        const doc = document.documentElement;
+        if (doc.requestFullscreen) doc.requestFullscreen();
+        document.getElementById('fs-overlay').classList.add('hidden');
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+        if (!document.fullscreenElement && activeSession) {
+            document.getElementById('fs-overlay').classList.remove('hidden');
+            activeSession.exits++;
+        }
     });
 
     function handleAuth() {
@@ -149,24 +181,37 @@
     }
 
     function initiateExam(name, set) {
+        goFullScreen();
+        // Uses the specific time limit defined for this set
+        const setTime = set[0].timeLimit || 30; 
         activeSession = { name, setName: set[0].set, questions: set, exits: 0 };
-        timeLeft = 30 * 60; startClock = Date.now();
+        timeLeft = setTime * 60; 
+        startClock = Date.now();
         document.getElementById('dispStudentName').innerText = name;
         document.getElementById('dispSetName').innerText = activeSession.setName;
         showView('examView'); renderQuiz();
+        
         timerInterval = setInterval(() => {
             timeLeft--;
             let m = Math.floor(timeLeft/60), s = timeLeft%60;
             document.getElementById('timer').innerText = `${m}:${s<10?'0'+s:s}`;
             if(timeLeft <= 0) submitExam();
         }, 1000);
-        window.onblur = () => activeSession.exits++;
+    }
+
+    function parseText(text) {
+        const imgRegex = /(https?:\/\/.*\.(?:png|jpg|jpeg|gif|webp))/i;
+        if (imgRegex.test(text)) {
+            const link = text.match(imgRegex)[0];
+            return `${text.replace(imgRegex, '')} <img src="${link}" class="q-img">`;
+        }
+        return text;
     }
 
     function renderQuiz() {
         document.getElementById('renderArea').innerHTML = activeSession.questions.map((q, i) => `
             <div class="glass-card">
-                <p><b>Q${i+1}:</b> ${q.text}</p>
+                <p><b>Q${i+1}:</b> ${parseText(q.text)}</p>
                 <div class="option-grid">${q.options.map(o => `<div class="option-card" id="q${i}-${o.replace(/\s/g,'')}" onclick="selectOpt(${i}, '${o}')">${o}</div>`).join('')}</div>
             </div>
         `).join('');
@@ -176,15 +221,17 @@
         userChoices[qi] = val;
         document.querySelectorAll(`[id^="q${qi}-"]`).forEach(el => el.classList.remove('selected'));
         const targetId = `q${qi}-${val.replace(/\s/g,'')}`;
-        document.getElementById(targetId).classList.add('selected');
+        const el = document.getElementById(targetId);
+        if(el) el.classList.add('selected');
     }
 
     function submitExam() {
         clearInterval(timerInterval);
+        if (document.fullscreenElement) document.exitFullscreen();
         const elapsed = Math.floor((Date.now() - startClock) / 1000);
         let score = 0, wrong = [];
         activeSession.questions.forEach((q, i) => {
-            if ((userChoices[i] || "").toLowerCase() === q.ans.toLowerCase()) score++;
+            if ((userChoices[i] || "").toLowerCase().trim() === q.ans.toLowerCase().trim()) score++;
             else wrong.push(i + 1);
         });
         const final = { 
@@ -195,8 +242,7 @@
             e: activeSession.exits, 
             folder: activeSession.setName 
         };
-        
-        socket.emit('submitExam', final); // Send to server real-time
+        socket.emit('submitExam', final);
         document.getElementById('resScoreText').innerText = Math.round((score/activeSession.questions.length)*100) + "%";
         document.getElementById('resStudentName').innerText = final.n;
         showView('resultsView');
@@ -205,14 +251,15 @@
     function saveQuestion() {
         const set = document.getElementById('qSetName').value.trim();
         const pass = document.getElementById('qSetPass').value.trim();
+        const timeLimit = parseInt(document.getElementById('qSetTime').value) || 30;
         const text = document.getElementById('qText').value.trim();
         const ans = document.getElementById('qAnswer').value.trim();
         const options = document.getElementById('qOptions').value.split('\n').filter(o => o.trim());
         
         if (!set || !pass || !text || !ans) return alert("Missing info.");
         
-        const qData = { id: Date.now(), set, pass, text, ans, options };
-        socket.emit('saveQuestion', qData); // Real-time broadcast
+        const qData = { id: Date.now(), set, pass, timeLimit, text, ans, options };
+        socket.emit('saveQuestion', qData);
         
         document.getElementById('qText').value = ""; 
         document.getElementById('qAnswer').value = ""; 
@@ -225,11 +272,11 @@
             const qs = questionBank.filter(q => q.set === s);
             return `
                 <div class="glass-card" style="border-left: 4px solid var(--primary);">
-                    <b>${s} (Pass: ${qs[0].pass})</b>
-                    <button class="btn-danger" style="float:right; padding:2px 8px;" onclick="socket.emit('deleteSet', '${s}')">Delete</button>
+                    <b>${s} (${qs[0].timeLimit}m | Pass: ${qs[0].pass})</b>
+                    <button class="btn btn-danger" style="float:right; padding:2px 8px; font-size:0.7rem;" onclick="socket.emit('deleteSet', '${s}')">Delete Set</button>
                     <div style="margin-top:10px;">
                         ${qs.map(q => `<div class="admin-q-item">
-                            ${q.text}<br>
+                            ${parseText(q.text)}<br>
                             <small class="admin-choices-list">${q.options.join(' | ')}</small><br>
                             <span class="admin-correct-ans">Ans: ${q.ans}</span>
                         </div>`).join('')}
@@ -240,14 +287,42 @@
 
     function openRecords() {
         showView('analyticsView');
+        renderFolderList();
+    }
+
+    function renderFolderList() {
         const folders = Object.keys(savedRecords);
-        document.getElementById('folderSidebar').innerHTML = folders.map(f => `<button class="folder-btn" onclick="loadFolder('${f}')">📁 ${f}</button>`).join('');
+        document.getElementById('folderSidebar').innerHTML = folders.map(f => `
+            <div class="folder-wrapper">
+                <button class="folder-btn" onclick="loadFolder('${f}')">📁 ${f}</button>
+                <button class="btn btn-danger" style="padding: 10px;" onclick="deleteResultsFolder('${f}')">🗑️</button>
+            </div>
+        `).join('');
+    }
+
+    function deleteResultsFolder(f) {
+        if(confirm(`Delete all results for ${f}?`)) {
+            socket.emit('deleteResultsFolder', f);
+            if(activeFolder === f) {
+                activeFolder = "";
+                document.getElementById('recordsTableBody').innerHTML = "";
+            }
+        }
     }
 
     function loadFolder(f) {
         activeFolder = f;
-        document.getElementById('viewingSetLabel').innerText = "Live: " + f;
-        document.getElementById('recordsTableBody').innerHTML = (savedRecords[f] || []).map(r => `<tr><td>${r.n}</td><td>${r.s}</td><td>${r.w}</td><td>${r.t}</td><td>${r.e}</td></tr>`).join('');
+        document.getElementById('viewingSetLabel').innerText = "Set: " + f;
+        const sorted = (savedRecords[f] || []).sort((a, b) => a.n.localeCompare(b.n));
+        document.getElementById('recordsTableBody').innerHTML = sorted.map(r => `
+            <tr>
+                <td style="font-weight:bold; color:var(--accent)">${r.n}</td>
+                <td>${r.s}</td>
+                <td style="color:var(--text-dim)">${r.w}</td>
+                <td>${r.t}</td>
+                <td style="color:${r.e > 0 ? 'var(--error)' : 'var(--success)'}">${r.e}</td>
+            </tr>
+        `).join('');
     }
 
     function showView(id) {
@@ -258,7 +333,7 @@
     function downloadReceipt() {
         html2canvas(document.getElementById('receiptBox'), {backgroundColor:'#0b0f1a'}).then(canvas => {
             let link = document.createElement('a');
-            link.download = 'Result.png'; link.href = canvas.toDataURL(); link.click();
+            link.download = `Result_${activeSession.name}.png`; link.href = canvas.toDataURL(); link.click();
         });
     }
 </script>
