@@ -53,9 +53,9 @@
 <body>
 
 <div id="fs-overlay" class="hidden">
-    <h1 style="font-size: 3rem;">⚠️ WARNING</h1>
-    <p style="font-size: 1.5rem;">Illegal Exit Detected. Access to exam is locked.</p>
-    <button class="btn btn-primary" style="background: white; color: var(--error); padding: 20px 40px; font-size: 1.2rem;" onclick="goFullScreen()">RETURN TO FULLSCREEN</button>
+    <h1>⚠️ WARNING</h1>
+    <p>Illegal Exit Detected. Access to exam is locked.</p>
+    <button class="btn btn-primary" onclick="goFullScreen()">RETURN TO FULLSCREEN</button>
 </div>
 
 <div id="adminDetailModal" class="admin-review-modal hidden">
@@ -70,10 +70,10 @@
     <div id="setupView">
         <div class="glass-card" style="max-width: 400px; margin: 80px auto; text-align: center;">
             <h2 style="color:var(--accent)">TEIL Section Portal</h2>
-            <p style="font-size: 0.8rem; color: var(--text-dim);">Students enter all info. Admins enter Password only.</p>
-            <input id="loginName" placeholder="Full Name">
+            <p style="font-size: 0.8rem; color: var(--text-dim);">Students: Name + Section + Pass. Admins: PIN only.</p>
+            <input id="loginName" placeholder="Full Name (Leave blank for Admin)">
             <input id="loginSection" placeholder="Section (e.g., 7-A)">
-            <input id="loginPass" type="password" placeholder="Access Password">
+            <input id="loginPass" type="password" placeholder="Access Password / Admin PIN">
             <button class="btn btn-primary" style="width:100%; margin-bottom: 10px;" onclick="handleAuth()">Access System</button>
             <button class="btn btn-outline" style="width:100%" onclick="showHistory()">View My History</button>
         </div>
@@ -81,10 +81,7 @@
 
     <div id="historyView" class="hidden">
         <div class="glass-card">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h2>Your Exam History</h2>
-                <button class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8rem;" onclick="clearHistory()">Reset History</button>
-            </div>
+            <h2>Your Exam History</h2>
             <div id="historyList"></div>
             <button class="btn btn-outline" style="width:100%; margin-top: 20px;" onclick="showView('setupView')">Back to Login</button>
         </div>
@@ -102,8 +99,8 @@
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:30px; margin-top:20px;">
                 <div>
                     <h3>Update Assessments</h3>
-                    <input id="qSetName" placeholder="Assessment Name (e.g. Science Quiz 1)">
-                    <input id="qSetPass" placeholder="Assessment Password (ReadOnly)" readonly style="opacity: 0.6; cursor: not-allowed;">
+                    <input id="qSetName" placeholder="Assessment Name">
+                    <input id="qSetPass" placeholder="Admin PIN (Locked)" readonly style="opacity: 0.6;">
                     <input id="qSetTime" type="number" placeholder="Time Limit (Minutes)" value="30">
                     <textarea id="qText" rows="2" placeholder="Question Text or Imgur Link"></textarea>
                     <textarea id="qOptions" rows="3" placeholder="Choices (one per line)"></textarea>
@@ -130,7 +127,7 @@
     <div id="analyticsView" class="hidden">
         <div class="glass-card">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2 id="resultsTitle">Live Section Records</h2>
+                <h2>Section Records</h2>
                 <button class="btn btn-outline" onclick="showView('editorView')">Back to Editor</button>
             </div>
             <div style="display:grid; grid-template-columns: 280px 1fr; gap:20px;">
@@ -138,14 +135,7 @@
                 <div>
                     <h3 id="viewingSetLabel">Select Folder</h3>
                     <table class="analytics-table">
-                        <thead><tr>
-                            <th style="width:20%">Name</th>
-                            <th style="width:15%">Correct</th>
-                            <th style="width:15%">Wrong</th>
-                            <th style="width:20%">Score %</th>
-                            <th style="width:15%">Time</th>
-                            <th style="width:15%">Exits</th>
-                        </tr></thead>
+                        <thead><tr><th>Name</th><th>Correct</th><th>Score %</th><th>Time</th><th>Exits</th></tr></thead>
                         <tbody id="recordsTableBody"></tbody>
                     </table>
                 </div>
@@ -155,16 +145,11 @@
 
     <div id="resultsView" class="hidden">
         <div id="receiptBox" class="glass-card" style="max-width:600px; margin:auto; text-align:center;">
-            <h1 id="receiptHeader">Certificate of Completion</h1>
+            <h1>Completion</h1>
             <h2 id="resScoreText" style="font-size:4rem; color:var(--accent);">0%</h2>
-            <p id="resStudentName" style="font-size: 1.5rem; font-weight: bold;"></p>
-            <p id="resSetNameText" style="color: var(--text-dim);"></p>
-            <p id="resDetailedScore" style="font-family: 'JetBrains Mono';"></p>
-            <p id="resTimestamp" style="font-size: 0.8rem; color: var(--border);"></p>
-            <div id="itemReviewArea" style="margin-top: 20px; max-height: 400px; overflow-y: auto; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px;"></div>
-            <hr style="border-color: var(--border); margin: 20px 0;">
-            <button class="btn btn-primary" onclick="downloadReceipt()">Download Certificate</button>
-            <button class="btn btn-outline" onclick="location.reload()" style="margin-top: 10px;">Exit to Portal</button>
+            <p id="resStudentName"></p>
+            <p id="resSetNameText"></p>
+            <button class="btn btn-outline" onclick="location.reload()">Exit to Portal</button>
         </div>
     </div>
 </div>
@@ -177,13 +162,15 @@
     let timerInterval, timeLeft, startClock;
     let userChoices = {};
     let activeFolder = "";
-    let currentLockedPass = ""; // The "Key" for this browser session
-    const MASTER_ADMIN_PASSWORDS = ["Admin123", "Science7", "TEIL2026", "GuestPass"];
+    let currentLockedPass = ""; 
+
+    // ADD YOUR ADMIN PASSWORDS HERE
+    const MASTER_ADMIN_PASSWORDS = ["1234", "Science7", "AdminAdmin", "Tick2026"];
 
     socket.on('initData', (data) => {
         questionBank = data.questionBank;
         savedRecords = data.studentResults;
-        if(currentLockedPass) renderAdminSets();
+        if(currentLockedPass) { renderAdminSets(); renderFolderList(); }
     });
 
     socket.on('updateQuestions', (data) => {
@@ -206,61 +193,57 @@
 
         if (!pass) return alert("Password required.");
 
-        // --- ADMIN LOGIN LOGIC ---
-        // Access Editor if Name is empty AND password is in the Master List
+        // ADMIN LOGIN: Name must be empty, Password must be in Master List
         if (!name) {
             if (MASTER_ADMIN_PASSWORDS.includes(pass)) {
                 currentLockedPass = pass;
                 document.getElementById('qSetPass').value = pass;
                 
+                // Auto-fill existing set name if this admin already has questions
                 const existingSet = questionBank.find(q => q.pass === pass);
                 if(existingSet) document.getElementById('qSetName').value = existingSet.set;
                 
-                document.getElementById('adminTitle').innerText = `Admin Access: ${pass}`;
+                document.getElementById('adminTitle').innerText = `Admin Session: ${pass}`;
                 showView('editorView');
                 renderAdminSets();
+                renderFolderList();
             } else {
-                alert("Invalid Admin Password.");
+                alert("Invalid Admin PIN.");
             }
             return;
         }
 
-        // --- STUDENT LOGIN LOGIC ---
+        // STUDENT LOGIN: Name + Section + Pass required. Pass must NOT be an Admin PIN.
         if (name && section) {
-            // 1. Prevent students from using Admin passwords to "guess" exams
             if (MASTER_ADMIN_PASSWORDS.includes(pass)) {
-                return alert("Access Denied: Admin passwords cannot be used to take exams.");
+                return alert("Access Denied: Admin PINs cannot be used to take exams.");
             }
 
-            // 2. Check if the password matches a created exam in the database
             let set = questionBank.filter(q => q.pass === pass);
             if (set.length > 0) {
                 let setWithOriginalOrder = set.map((q, idx) => ({ ...q, originalIdx: idx + 1 }));
                 setWithOriginalOrder = shuffle(setWithOriginalOrder).map(q => ({ ...q, options: shuffle(q.options) }));
                 initiateExam(name, section, setWithOriginalOrder);
             } else {
-                alert("Incorrect Exam Password or Exam not found.");
+                alert("Wrong Exam Password.");
             }
         } else {
-            alert("Please enter your Full Name and Section.");
+            alert("Enter Name and Section.");
         }
     }
 
     function renderAdminSets() {
-        // Filter ONLY questions belonging to this browser's specific password
         const myQuestions = questionBank.filter(q => q.pass === currentLockedPass);
-        const setName = myQuestions.length > 0 ? myQuestions[0].set : "New Section";
+        const setName = myQuestions.length > 0 ? myQuestions[0].set : "New Set";
 
         document.getElementById('activeSetsDisplay').innerHTML = `
-            <div class="glass-card" style="border-left: 4px solid var(--accent);">
-                <b>Assessment: ${setName}</b><br>
-                <small>Linked Password: ${currentLockedPass}</small>
+            <div class="glass-card">
+                <b>${setName} (${myQuestions.length} Items)</b>
                 <div style="margin-top:10px;">
                     ${myQuestions.map(q => `
-                        <div style="margin-bottom:10px; border-bottom:1px solid #334155; padding-bottom:5px; position:relative;">
-                            <button class="btn-danger" style="position:absolute; right:0; top:0; padding:2px 5px; font-size:9px;" onclick="socket.emit('deleteQuestion', ${q.id})">Remove</button>
-                            ${parseText(q.text)}<br>
-                            <span class="admin-correct-highlight">Ans: ${q.ans}</span>
+                        <div style="border-bottom:1px solid #334155; padding:5px; position:relative;">
+                            <button class="btn-danger" style="position:absolute; right:0; top:0;" onclick="socket.emit('deleteQuestion', ${q.id})">×</button>
+                            ${q.text}<br><small>Ans: ${q.ans}</small>
                         </div>
                     `).join('')}
                 </div>
@@ -268,43 +251,37 @@
     }
 
     function renderFolderList() {
-        // Filter student record folders to ONLY show those matching this password's assessment name
         const myQuestions = questionBank.filter(q => q.pass === currentLockedPass);
-        const mySetName = myQuestions.length > 0 ? myQuestions[0].set : "";
+        const mySetName = myQuestions.length > 0 ? myQuestions[0].set : "___";
         
+        // Only show folders that belong to this Admin's Assessment Name
         let folders = Object.keys(savedRecords).filter(f => f.includes(mySetName)).sort();
 
         document.getElementById('folderSidebar').innerHTML = folders.map(f => `
             <div class="folder-wrapper">
                 <button class="folder-btn" onclick="loadFolder('${f}')">📁 ${f}</button>
             </div>
-        `).join('');
+        `).join('') || "<small>No results yet.</small>";
     }
 
     function saveQuestion() {
         const set = document.getElementById('qSetName').value.trim();
-        const pass = currentLockedPass; // Always use the login password
+        const pass = currentLockedPass; 
         const timeLimit = parseInt(document.getElementById('qSetTime').value) || 30;
         const text = document.getElementById('qText').value.trim();
         const ans = document.getElementById('qAnswer').value.trim();
         const options = document.getElementById('qOptions').value.split('\n').filter(o => o.trim());
 
-        if (!set || !text || !ans) return alert("Please fill in question, answer, and assessment name.");
+        if (!set || !text || !ans) return alert("Fill all fields.");
         
         const qData = { id: Date.now(), set, pass, timeLimit, text, ans, options };
         socket.emit('saveQuestion', qData);
-        document.getElementById('qText').value = ""; 
-        document.getElementById('qAnswer').value = ""; 
-        document.getElementById('qOptions').value = "";
+        document.getElementById('qText').value = ""; document.getElementById('qAnswer').value = "";
     }
 
-    // --- RE-USE EXISTING LOGIC FOR OTHER FUNCTIONS ---
+    // --- SHARED CORE LOGIC ---
     function shuffle(array) { let arr = [...array]; for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; }
     function showView(id) { document.querySelectorAll('.app-container > div').forEach(d => d.classList.add('hidden')); document.getElementById(id).classList.remove('hidden'); }
-    function parseText(text) { const imgRegex = /(https?:\/\/.*\.(?:png|jpg|jpeg|gif|webp))/i; if (imgRegex.test(text)) { return `${text.replace(imgRegex, '')} <img src="${text.match(imgRegex)[0]}" class="q-img">`; } return text; }
-    function openRecords() { showView('analyticsView'); renderFolderList(); }
-    function closeAdminModal() { document.getElementById('adminDetailModal').classList.add('hidden'); }
-    
     function initiateExam(name, section, set) {
         goFullScreen();
         activeSession = { name, section, setName: set[0].set, questions: set, exits: 0 };
@@ -325,7 +302,7 @@
     function renderQuiz() {
         document.getElementById('renderArea').innerHTML = activeSession.questions.map((q, i) => `
             <div class="glass-card">
-                <p><b>Q${i+1}:</b> ${parseText(q.text)}</p>
+                <p><b>Q${i+1}:</b> ${q.text}</p>
                 <div class="option-grid">${q.options.map(o => `<div class="option-card" id="q${i}-${o.replace(/\s/g,'')}" onclick="selectOpt(${i}, '${o}')">${o}</div>`).join('')}</div>
             </div>
         `).join('');
@@ -347,50 +324,25 @@
             const userAns = userChoices[i] || "No Answer";
             const isCorrect = userAns.toLowerCase().trim() === q.ans.toLowerCase().trim();
             if (isCorrect) score++;
-            reviewData.push({ origId: q.originalIdx, qText: q.text, options: q.options, uAns: userAns, cAns: q.ans, correct: isCorrect });
+            reviewData.push({ origId: q.originalIdx, qText: q.text, uAns: userAns, cAns: q.ans, correct: isCorrect });
         });
-        const final = { n: activeSession.name, sec: activeSession.section, s: `${score}/${activeSession.questions.length}`, w: `${activeSession.questions.length - score}`, sp: Math.round((score/activeSession.questions.length)*100) + "%", t: `${Math.floor(elapsed/60)}m ${elapsed%60}s`, e: activeSession.exits, folder: `[${activeSession.section}] ${activeSession.setName}`, date: new Date().toLocaleString(), review: reviewData };
+        const final = { n: activeSession.name, sec: activeSession.section, s: `${score}/${activeSession.questions.length}`, w: `${activeSession.questions.length - score}`, sp: Math.round((score/activeSession.questions.length)*100) + "%", t: `${Math.floor(elapsed/60)}m ${elapsed%60}s`, e: activeSession.exits, folder: `[${activeSession.section}] ${activeSession.setName}`, review: reviewData };
         socket.emit('submitExam', final);
-        showCertificate(final);
-    }
-
-    function showCertificate(data) {
-        document.getElementById('resScoreText').innerText = data.sp;
-        document.getElementById('resStudentName').innerText = data.n;
-        document.getElementById('resSetNameText').innerText = data.folder;
+        document.getElementById('resScoreText').innerText = final.sp;
+        document.getElementById('resStudentName').innerText = final.n;
         showView('resultsView');
     }
 
     function loadFolder(f) {
         activeFolder = f;
-        document.getElementById('viewingSetLabel').innerText = "Folder: " + f;
+        document.getElementById('viewingSetLabel').innerText = f;
         const sorted = (savedRecords[f] || []).sort((a, b) => a.n.localeCompare(b.n));
         document.getElementById('recordsTableBody').innerHTML = sorted.map(r => `
-            <tr class="clickable-row" onclick='openAdminModal(${JSON.stringify(r)})'>
-                <td style="font-weight:bold; color:var(--accent)">${r.n}</td>
-                <td style="color:var(--success)">${r.s}</td>
-                <td style="color:var(--error)">${r.w}</td>
-                <td>${r.sp}</td>
-                <td>${r.t}</td>
-                <td>${r.e}</td>
-            </tr>
+            <tr><td>${r.n}</td><td>${r.s}</td><td>${r.sp}</td><td>${r.t}</td><td>${r.e}</td></tr>
         `).join('');
     }
 
-    function openAdminModal(record) {
-        const modal = document.getElementById('adminDetailModal');
-        document.getElementById('modalStudentName').innerText = `${record.n} - Review`;
-        document.getElementById('modalReviewBody').innerHTML = record.review.map(item => `
-            <div class="review-item">
-                <b>Q: ${item.qText}</b><br>
-                Ans: <span class="${item.correct ? 'review-correct' : 'review-wrong'}">${item.uAns}</span> 
-                ${!item.correct ? `<br><small>Correct: ${item.cAns}</small>` : ''}
-            </div>
-        `).join('');
-        modal.classList.remove('hidden');
-    }
-
-    function goFullScreen() { document.documentElement.requestFullscreen(); document.getElementById('fs-overlay').classList.add('hidden'); }
+    function goFullScreen() { document.documentElement.requestFullscreen().catch(()=>{}); document.getElementById('fs-overlay').classList.add('hidden'); }
     document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && activeSession) { document.getElementById('fs-overlay').classList.remove('hidden'); activeSession.exits++; } });
 </script>
 </body>
