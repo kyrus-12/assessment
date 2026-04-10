@@ -7,14 +7,20 @@ const fs = require('fs');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { 
-    maxHttpBufferSize: 1e7 // 10MB limit for image data
+    maxHttpBufferSize: 1e7 // 10MB limit
 });
+
+// --- ADMIN DATABASE (Keep this synced with your frontend) ---
+const ADMIN_CREDENTIALS = {
+    "admin": "1234",
+    "teacher1": "pass567",
+    "john": "renz2026"
+};
 
 // --- PERMANENT STORAGE SETUP ---
 const DB_PATH = path.join(__dirname, 'questionBank.json');
 const RESULTS_PATH = path.join(__dirname, 'studentResults.json');
 
-// Helper to safely load JSON
 function loadJSON(filePath, defaultValue) {
     try {
         if (fs.existsSync(filePath)) {
@@ -33,38 +39,33 @@ function saveData() {
     try {
         fs.writeFileSync(DB_PATH, JSON.stringify(questionBank, null, 2));
         fs.writeFileSync(RESULTS_PATH, JSON.stringify(studentResults, null, 2));
-        console.log("Data successfully synced to JSON files."); // Log this to verify
     } catch (err) {
         console.error("Critical: Data Save Error:", err);
     }
 }
 
-// --- MIDDLEWARE ---
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- REAL-TIME LOGIC ---
-// --- Updated Socket Logic ---
 io.on('connection', (socket) => {
     let currentUser = null;
+    console.log('User connected:', socket.id);
 
-    // Remove the automatic 'initData' broadcast here. 
-    // We only send data AFTER a successful login.
+    // Initial data for students (Admins get filtered data via login)
+    socket.emit('initData', { questionBank, studentResults });
 
+    // --- AUTHENTICATION ---
     socket.on('adminLogin', (data) => {
         const { name, pass } = data;
         const nameLower = name.toLowerCase();
         
-        if (ADMIN_CREDENTIALS[nameLower] === pass) {
-            currentUser = nameLower; // Store the admin name for this session
+        if (ADMIN_CREDENTIALS[nameLower] && ADMIN_CREDENTIALS[nameLower] === pass) {
+            currentUser = nameLower; 
             
-            // Filter data: Only send questions and results belonging to THIS admin
+            // Filter: Only send data belonging to THIS admin
             const userQuestions = questionBank.filter(q => q.owner === currentUser);
-            
-            // Filter results: Only folders created by this admin
             const userResults = {};
             for (const folder in studentResults) {
-                // We check if any question in this set belongs to the admin
-                // Or more simply, if the folder was created during their session
                 if (studentResults[folder].some(r => r.owner === currentUser)) {
                     userResults[folder] = studentResults[folder];
                 }
@@ -83,8 +84,6 @@ io.on('connection', (socket) => {
     // --- QUESTION MANAGEMENT ---
     socket.on('saveQuestion', (qData) => {
         if (!currentUser) return;
-        
-        // TAG the question with the owner
         const taggedData = { ...qData, owner: currentUser };
         
         const index = questionBank.findIndex(q => q.id === qData.id);
@@ -95,34 +94,27 @@ io.on('connection', (socket) => {
         }
         
         saveData();
-        // Only emit back to the owner, not everyone
+        // Update only the current admin's view
         socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
     });
 
     socket.on('deleteQuestion', (qId) => {
+        if (!currentUser) return;
         questionBank = questionBank.filter(q => q.id !== qId);
         saveData();
-        io.emit('updateQuestions', questionBank);
+        socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
     });
 
     socket.on('deleteSet', (setName) => {
+        if (!currentUser) return;
         questionBank = questionBank.filter(q => q.set !== setName);
         saveData();
-        io.emit('updateQuestions', questionBank);
+        socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
     });
-
-    socket.on('adminLogin', (data) => {
-    const { name, pass } = data;
-    if (ADMIN_CREDENTIALS[name.toLowerCase()] === pass) {
-        socket.emit('loginSuccess', 'editorView');
-    } else {
-        socket.emit('loginError', 'Incorrect Admin Password.');
-    }
-});
 
     // --- RESULTS MANAGEMENT ---
     socket.on('submitExam', (result) => {
-        // When a student submits, find the owner of that specific question set
+        // Tag the result with the owner of the set
         const setOwner = questionBank.find(q => q.set === result.setName)?.owner;
         
         if (setOwner) {
@@ -133,13 +125,10 @@ io.on('connection', (socket) => {
             studentResults[folder].push(finalResult);
             
             saveData();
-            // IMPORTANT: Broadcast only to the specific admin if they are online
-            // For simplicity in this logic, we emit to everyone, 
-            // but the frontend will filter it out if you refresh.
+            // Emit to everyone so active admins see live updates
             io.emit('updateResults', studentResults); 
         }
     });
-});
 
     socket.on('deleteResultsFolder', (folderName) => {
         if (studentResults[folderName]) {
@@ -149,7 +138,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('disconnect', () => console.log('User disconnected'));
+    socket.on('disconnect', () => console.log('User disconnected:', socket.id));
 });
 
 // --- ROUTES ---
