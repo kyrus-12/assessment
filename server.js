@@ -6,47 +6,35 @@ const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { 
-    maxHttpBufferSize: 1e7 // 10MB limit
-});
+const io = new Server(server, { maxHttpBufferSize: 1e7 });
 
+// Paths for permanent storage
 const DB_PATH = path.join(__dirname, 'questionBank.json');
 const RESULTS_PATH = path.join(__dirname, 'studentResults.json');
 
-// Initialize files with empty defaults if missing
-if (!fs.existsSync(DB_PATH)) fs.writeFileSync(DB_PATH, JSON.stringify([]));
-if (!fs.existsSync(RESULTS_PATH)) fs.writeFileSync(RESULTS_PATH, JSON.stringify({}));
-
-let questionBank = JSON.parse(fs.readFileSync(DB_PATH));
-let studentResults = JSON.parse(fs.readFileSync(RESULTS_PATH));
+// Load data from files or initialize empty
+let questionBank = fs.existsSync(DB_PATH) ? JSON.parse(fs.readFileSync(DB_PATH)) : [];
+let studentResults = fs.existsSync(RESULTS_PATH) ? JSON.parse(fs.readFileSync(RESULTS_PATH)) : {};
 
 function saveData() {
-    try {
-        fs.writeFileSync(DB_PATH, JSON.stringify(questionBank, null, 2));
-        fs.writeFileSync(RESULTS_PATH, JSON.stringify(studentResults, null, 2));
-    } catch (err) {
-        console.error("Critical: Data Save Error:", err);
-    }
+    fs.writeFileSync(DB_PATH, JSON.stringify(questionBank, null, 2));
+    fs.writeFileSync(RESULTS_PATH, JSON.stringify(studentResults, null, 2));
 }
 
 app.use(express.static(path.join(__dirname, 'public')));
 
 io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
-
-    // Initial data sync
+    console.log('User connected');
     socket.emit('initData', { questionBank, studentResults });
 
-    // --- QUESTION MANAGEMENT ---
     socket.on('saveQuestion', (qData) => {
-        // qData now includes adminPin AND pass (exam password)
-        const index = questionBank.findIndex(q => q.id === qData.id);
-        if (index !== -1) {
-            questionBank[index] = qData;
-        } else {
-            questionBank.push(qData);
-        }
-        
+        questionBank.push(qData);
+        saveData();
+        io.emit('updateQuestions', questionBank);
+    });
+
+    socket.on('deleteSet', (setName) => {
+        questionBank = questionBank.filter(q => q.set !== setName);
         saveData();
         io.emit('updateQuestions', questionBank);
     });
@@ -57,40 +45,23 @@ io.on('connection', (socket) => {
         io.emit('updateQuestions', questionBank);
     });
 
-    // FIXED: Uses adminPin to ensure only the owner can delete the set
-    socket.on('deleteSet', ({ setName, adminPin }) => {
-        questionBank = questionBank.filter(q => !(q.set === setName && q.adminPin === adminPin));
-        saveData();
-        io.emit('updateQuestions', questionBank);
-    });
-
-    // --- RESULTS MANAGEMENT ---
-    socket.on('submitExam', (result) => {
-        const folder = result.folder;
-        if (!studentResults[folder]) studentResults[folder] = [];
-
-        // Check if student already has a record in this specific folder
-        const existingIndex = studentResults[folder].findIndex(r => r.n === result.n);
-        
-        if (existingIndex !== -1) {
-            studentResults[folder][existingIndex] = result;
-        } else {
-            studentResults[folder].push(result);
-        }
-        
+    socket.on('deleteResultsFolder', (folderName) => {
+        delete studentResults[folderName];
         saveData();
         io.emit('updateResults', studentResults);
     });
 
-    socket.on('deleteResultsFolder', (folderName) => {
-        if (studentResults[folderName]) {
-            delete studentResults[folderName];
+    socket.on('submitExam', (result) => {
+        const folder = result.folder;
+        if (!studentResults[folder]) studentResults[folder] = [];
+        
+        // Check for duplicate names in the folder
+        if (!studentResults[folder].find(r => r.n === result.n)) {
+            studentResults[folder].push(result);
             saveData();
             io.emit('updateResults', studentResults);
         }
     });
-
-    socket.on('disconnect', () => console.log('User disconnected'));
 });
 
 app.get('/', (req, res) => {
@@ -98,4 +69,4 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`TEIL Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`Server active on port ${PORT}`));
