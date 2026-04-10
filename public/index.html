@@ -195,9 +195,9 @@
     });
 
     socket.on('updateQuestions', (data) => {
-        questionBank = data;
-        renderAdminSets();
-    });
+    questionBank = data;
+    renderAdminSets(); // This re-draws the list so your new question stays visible
+});
 
     socket.on('updateResults', (data) => {
         savedRecords = data;
