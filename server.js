@@ -5,48 +5,68 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+
+// Increase the max payload size just in case you have very long exams with many images/options
+const io = new Server(server, {
+    maxHttpBufferSize: 1e7 // 10MB
+});
 
 // In-memory "Database"
 let questionBank = [];
-let studentResults = {}; // Organized by Folder/SetName
+let studentResults = {}; // Keys will now be "[Section] SetName"
 
 // Serve static files from the 'public' folder
 app.use(express.static(path.join(__dirname, 'public')));
 
 io.on('connection', (socket) => {
-    console.log('A user connected:', socket.id);
+    console.log('User connected:', socket.id);
 
-    // Send initial data to the client
+    // 1. Sync data immediately on connection
     socket.emit('initData', { questionBank, studentResults });
 
-    // Admin: Save new question (Includes the specific time limit for the set)
+    // 2. Admin: Save new question
     socket.on('saveQuestion', (qData) => {
         questionBank.push(qData);
-        io.emit('updateQuestions', questionBank); // Broadcast to everyone
+        io.emit('updateQuestions', questionBank); 
     });
 
-    // Admin: Delete Set
+    // 3. Admin: Delete an entire Question Set
     socket.on('deleteSet', (setName) => {
         questionBank = questionBank.filter(q => q.set !== setName);
         io.emit('updateQuestions', questionBank);
     });
 
-    // Admin: Delete Specific Results Folder
-    socket.on('deleteResultsFolder', (folderName) => {
-        delete studentResults[folderName];
-        io.emit('updateResults', studentResults);
+    // 4. Admin: Delete a specific Question (By ID)
+    socket.on('deleteQuestion', (qId) => {
+        questionBank = questionBank.filter(q => q.id !== qId);
+        io.emit('updateQuestions', questionBank);
     });
 
-    // Student: Submit Exam
+    // 5. Admin: Delete Results Folder (The "[Section] SetName" folder)
+    socket.on('deleteResultsFolder', (folderName) => {
+        if (studentResults[folderName]) {
+            delete studentResults[folderName];
+            io.emit('updateResults', studentResults);
+        }
+    });
+
+    // 6. Student: Submit Exam
     socket.on('submitExam', (result) => {
-        const folder = result.folder;
-        if (!studentResults[folder]) studentResults[folder] = [];
+        const folder = result.folder; // This is "[Section] SetName" from the client
         
-        // Prevent duplicate names in same folder
-        if (!studentResults[folder].find(r => r.n === result.n)) {
+        if (!studentResults[folder]) {
+            studentResults[folder] = [];
+        }
+
+        // Check if student already submitted to this specific folder/section
+        const existingEntry = studentResults[folder].find(r => r.n === result.n);
+        
+        if (!existingEntry) {
+            // Push the full result including the 'review' array and 'sec' (section)
             studentResults[folder].push(result);
-            io.emit('updateResults', studentResults); // Real-time update for Admin
+            io.emit('updateResults', studentResults); 
+        } else {
+            console.log(`Duplicate submission blocked: ${result.n} in ${folder}`);
         }
     });
 
@@ -55,7 +75,6 @@ io.on('connection', (socket) => {
     });
 });
 
-// ROUTE: Direct home request to index.html
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
