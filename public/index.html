@@ -17,13 +17,12 @@
         .app-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         .hidden { display: none !important; }
         .glass-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; }
-        .btn { padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; border: none; transition: 0.2s; }
+        .btn { padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; border: none; transition: 0.2s; display: inline-block; text-align: center; }
         .btn-primary { background: var(--primary); color: white; }
         .btn-danger { background: var(--error); color: white; }
         .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
         input, select, textarea { background: #0f172a; border: 1px solid var(--border); border-radius: 6px; color: white; padding: 12px; width: 100%; margin-bottom: 12px; box-sizing: border-box; }
         
-        /* Fixed Table for long content */
         .analytics-table { width: 100%; border-collapse: collapse; margin-top: 15px; table-layout: fixed; }
         .analytics-table th { background: rgba(255,255,255,0.05); text-align: left; padding: 12px; color: var(--accent); border-bottom: 2px solid var(--border); }
         .analytics-table td { padding: 12px; border-bottom: 1px solid var(--border); font-size: 0.85rem; word-wrap: break-word; vertical-align: top; }
@@ -36,8 +35,12 @@
         .folder-btn { flex-grow: 1; text-align: left; padding: 12px; background: #0f172a; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; color: var(--accent); font-weight: 600; }
         
         .q-img { max-width: 100%; border-radius: 8px; margin: 10px 0; display: block; border: 1px solid var(--border); }
-        
+        .admin-correct-highlight { color: var(--success); font-weight: bold; background: rgba(16, 185, 129, 0.1); padding: 2px 6px; border-radius: 4px; }
+
         #fs-overlay { position: fixed; inset: 0; background: var(--error); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
+        
+        /* History Styles */
+        .history-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid var(--border); }
     </style>
 </head>
 <body>
@@ -54,7 +57,16 @@
             <h2 style="color:var(--accent)">TEIL Real-Time Portal</h2>
             <input id="loginName" placeholder="Full Name (Leave blank for Admin)">
             <input id="loginPass" type="password" placeholder="Password or PIN">
-            <button class="btn btn-primary" style="width:100%" onclick="handleAuth()">Access System</button>
+            <button class="btn btn-primary" style="width:100%; margin-bottom: 10px;" onclick="handleAuth()">Access System</button>
+            <button class="btn btn-outline" style="width:100%" onclick="showHistory()">View My History</button>
+        </div>
+    </div>
+
+    <div id="historyView" class="hidden">
+        <div class="glass-card">
+            <h2>Your Exam History</h2>
+            <div id="historyList"></div>
+            <button class="btn btn-outline" style="width:100%; margin-top: 20px;" onclick="showView('setupView')">Back to Login</button>
         </div>
     </div>
 
@@ -70,9 +82,9 @@
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:30px; margin-top:20px;">
                 <div>
                     <h3>Create Questions</h3>
-                    <input id="qSetName" placeholder="Set Name (e.g. Midterm)">
+                    <input id="qSetName" placeholder="Set Name">
                     <input id="qSetPass" placeholder="Set Password">
-                    <input id="qSetTime" type="number" placeholder="Time for THIS Set (Minutes)" value="30">
+                    <input id="qSetTime" type="number" placeholder="Total Time Limit (Minutes)" value="30">
                     <textarea id="qText" rows="2" placeholder="Question Text or Imgur Link"></textarea>
                     <textarea id="qOptions" rows="3" placeholder="Choices (one per line)"></textarea>
                     <input id="qAnswer" placeholder="Correct Answer">
@@ -122,10 +134,14 @@
 
     <div id="resultsView" class="hidden">
         <div id="receiptBox" class="glass-card" style="max-width:500px; margin:auto; text-align:center;">
-            <h1>Completed!</h1>
+            <h1 id="receiptHeader">Certificate of Completion</h1>
             <h2 id="resScoreText" style="font-size:4rem; color:var(--accent);">0%</h2>
-            <p id="resStudentName"></p>
-            <button class="btn btn-primary" onclick="downloadReceipt()">Save Receipt</button>
+            <p id="resStudentName" style="font-size: 1.5rem; font-weight: bold;"></p>
+            <p id="resSetNameText" style="color: var(--text-dim);"></p>
+            <p id="resTimestamp" style="font-size: 0.8rem; color: var(--border);"></p>
+            <hr style="border-color: var(--border); margin: 20px 0;">
+            <button class="btn btn-primary" onclick="downloadReceipt()">Download Certificate</button>
+            <button class="btn btn-outline" onclick="location.reload()" style="margin-top: 10px;">Exit to Portal</button>
         </div>
     </div>
 </div>
@@ -156,6 +172,16 @@
         if (activeFolder) loadFolder(activeFolder);
     });
 
+    // Helper: Shuffle Array (Fisher-Yates)
+    function shuffle(array) {
+        let arr = [...array];
+        for (let i = arr.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+    }
+
     function goFullScreen() {
         const doc = document.documentElement;
         if (doc.requestFullscreen) doc.requestFullscreen();
@@ -174,16 +200,21 @@
         const pass = document.getElementById('loginPass').value.trim();
         if (!name && pass === "1234") { showView('editorView'); return; }
         if (name && pass) {
-            const set = questionBank.filter(q => q.pass === pass);
-            if (set.length > 0) initiateExam(name, set);
+            let set = questionBank.filter(q => q.pass === pass);
+            if (set.length > 0) {
+                // Shuffle questions for this specific student session
+                set = shuffle(set);
+                // Shuffle options inside each question
+                set = set.map(q => ({ ...q, options: shuffle(q.options) }));
+                initiateExam(name, set);
+            }
             else alert("Exam not found or wrong password.");
         } else alert("Fill details.");
     }
 
     function initiateExam(name, set) {
         goFullScreen();
-        // Uses the specific time limit defined for this set
-        const setTime = set[0].timeLimit || 30; 
+        const setTime = set[0].timeLimit || 30;
         activeSession = { name, setName: set[0].set, questions: set, exits: 0 };
         timeLeft = setTime * 60; 
         startClock = Date.now();
@@ -202,8 +233,7 @@
     function parseText(text) {
         const imgRegex = /(https?:\/\/.*\.(?:png|jpg|jpeg|gif|webp))/i;
         if (imgRegex.test(text)) {
-            const link = text.match(imgRegex)[0];
-            return `${text.replace(imgRegex, '')} <img src="${link}" class="q-img">`;
+            return `${text.replace(imgRegex, '')} <img src="${text.match(imgRegex)[0]}" class="q-img">`;
         }
         return text;
     }
@@ -228,24 +258,67 @@
     function submitExam() {
         clearInterval(timerInterval);
         if (document.fullscreenElement) document.exitFullscreen();
+        
         const elapsed = Math.floor((Date.now() - startClock) / 1000);
         let score = 0, wrong = [];
         activeSession.questions.forEach((q, i) => {
             if ((userChoices[i] || "").toLowerCase().trim() === q.ans.toLowerCase().trim()) score++;
             else wrong.push(i + 1);
         });
+        
+        const scorePercent = Math.round((score/activeSession.questions.length)*100);
         const final = { 
             n: activeSession.name, 
             s: `${score}/${activeSession.questions.length}`, 
+            sp: scorePercent + "%",
             w: wrong.join(', ') || 'None', 
             t: `${Math.floor(elapsed/60)}m ${elapsed%60}s`, 
             e: activeSession.exits, 
-            folder: activeSession.setName 
+            folder: activeSession.setName,
+            date: new Date().toLocaleString()
         };
+
+        // Save to Local History
+        let history = JSON.parse(localStorage.getItem('exam_history') || "[]");
+        history.push(final);
+        localStorage.setItem('exam_history', JSON.stringify(history));
+
         socket.emit('submitExam', final);
-        document.getElementById('resScoreText').innerText = Math.round((score/activeSession.questions.length)*100) + "%";
-        document.getElementById('resStudentName').innerText = final.n;
+        showCertificate(final);
+    }
+
+    function showCertificate(data) {
+        document.getElementById('resScoreText').innerText = data.sp;
+        document.getElementById('resStudentName').innerText = data.n;
+        document.getElementById('resSetNameText').innerText = data.folder;
+        document.getElementById('resTimestamp').innerText = data.date;
         showView('resultsView');
+    }
+
+    function showHistory() {
+        showView('historyView');
+        const history = JSON.parse(localStorage.getItem('exam_history') || "[]");
+        const list = document.getElementById('historyList');
+        if (history.length === 0) {
+            list.innerHTML = "<p style='text-align:center; color:var(--text-dim)'>No exams found.</p>";
+            return;
+        }
+        list.innerHTML = history.reverse().map((h, i) => `
+            <div class="history-item">
+                <div>
+                    <b>${h.folder}</b><br>
+                    <small>${h.date}</small>
+                </div>
+                <div style="text-align:right">
+                    <span style="color:var(--accent); font-weight:bold;">${h.sp}</span><br>
+                    <button class="btn btn-primary" style="padding:4px 8px; font-size:10px;" onclick='reprintCertificate(${JSON.stringify(h)})'>Certificate</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    function reprintCertificate(data) {
+        showCertificate(data);
     }
 
     function saveQuestion() {
@@ -255,12 +328,10 @@
         const text = document.getElementById('qText').value.trim();
         const ans = document.getElementById('qAnswer').value.trim();
         const options = document.getElementById('qOptions').value.split('\n').filter(o => o.trim());
-        
         if (!set || !pass || !text || !ans) return alert("Missing info.");
         
         const qData = { id: Date.now(), set, pass, timeLimit, text, ans, options };
         socket.emit('saveQuestion', qData);
-        
         document.getElementById('qText').value = ""; 
         document.getElementById('qAnswer').value = ""; 
         document.getElementById('qOptions').value = "";
@@ -273,12 +344,12 @@
             return `
                 <div class="glass-card" style="border-left: 4px solid var(--primary);">
                     <b>${s} (${qs[0].timeLimit}m | Pass: ${qs[0].pass})</b>
-                    <button class="btn btn-danger" style="float:right; padding:2px 8px; font-size:0.7rem;" onclick="socket.emit('deleteSet', '${s}')">Delete Set</button>
+                    <button class="btn-danger" style="float:right; padding:2px 8px; font-size: 10px;" onclick="socket.emit('deleteSet', '${s}')">Delete Set</button>
                     <div style="margin-top:10px;">
-                        ${qs.map(q => `<div class="admin-q-item">
+                        ${qs.map(q => `<div style="margin-bottom:10px; border-bottom:1px solid #334155; padding-bottom:5px;">
                             ${parseText(q.text)}<br>
-                            <small class="admin-choices-list">${q.options.join(' | ')}</small><br>
-                            <span class="admin-correct-ans">Ans: ${q.ans}</span>
+                            <small style="color:var(--text-dim)">${q.options.join(' | ')}</small><br>
+                            <span class="admin-correct-highlight">Correct Answer: ${q.ans}</span>
                         </div>`).join('')}
                     </div>
                 </div>`;
@@ -333,7 +404,7 @@
     function downloadReceipt() {
         html2canvas(document.getElementById('receiptBox'), {backgroundColor:'#0b0f1a'}).then(canvas => {
             let link = document.createElement('a');
-            link.download = `Result_${activeSession.name}.png`; link.href = canvas.toDataURL(); link.click();
+            link.download = `Certificate_${document.getElementById('resStudentName').innerText}.png`; link.href = canvas.toDataURL(); link.click();
         });
     }
 </script>
