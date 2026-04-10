@@ -58,30 +58,32 @@ io.on('connection', (socket) => {
         io.emit('updateQuestions', questionBank);
     });
 
-    socket.on('deleteSet', (setName) => {
-        questionBank = questionBank.filter(q => q.set !== setName);
-        saveData();
-        io.emit('updateQuestions', questionBank);
-    });
+    socket.on('deleteSet', ({ setName, pass }) => {
+    // Only delete the set if BOTH the name and the admin password match
+    questionBank = questionBank.filter(q => !(q.set === setName && q.pass === pass));
+    saveData();
+    io.emit('updateQuestions', questionBank);
+});
 
     // --- RESULTS MANAGEMENT ---
     socket.on('submitExam', (result) => {
-        const folder = result.folder;
-        if (!studentResults[folder]) studentResults[folder] = [];
+    const folder = result.folder;
+    if (!studentResults[folder]) studentResults[folder] = [];
 
-        // Check for duplicates
-        const alreadyExists = studentResults[folder].some(r => r.n === result.n);
-        
-        if (!alreadyExists) {
-            studentResults[folder].push(result);
-            saveData();
-            // Broadcast to admins only (performance tip: use rooms if you scale later)
-            io.emit('updateResults', studentResults);
-            console.log(`Success: ${result.n} saved in ${folder}`);
-        } else {
-            console.log(`Blocked: Duplicate detected for ${result.n}`);
-        }
-    });
+    // Find if the student already has a record in this folder
+    const existingIndex = studentResults[folder].findIndex(r => r.n === result.n);
+    
+    if (existingIndex !== -1) {
+        // Overwrite existing record (Update mode)
+        studentResults[folder][existingIndex] = result;
+    } else {
+        // Add new record
+        studentResults[folder].push(result);
+    }
+    
+    saveData();
+    io.emit('updateResults', studentResults);
+});
 
     socket.on('deleteResultsFolder', (folderName) => {
         if (studentResults[folderName]) {
