@@ -282,6 +282,10 @@ socket.on('loginError', (msg) => {
     alert(msg);
 });
 
+    socket.on('refreshGlobalBank', (updatedBank) => {
+    questionBank = updatedBank;
+});
+
     function initiateExam(name, section, set) {
         goFullScreen();
         const setTime = set[0].timeLimit || 30;
