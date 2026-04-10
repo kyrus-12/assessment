@@ -20,7 +20,7 @@ io.on('connection', (socket) => {
     // Send initial data to the client
     socket.emit('initData', { questionBank, studentResults });
 
-    // Admin: Save new question
+    // Admin: Save new question (Includes the specific time limit for the set)
     socket.on('saveQuestion', (qData) => {
         questionBank.push(qData);
         io.emit('updateQuestions', questionBank); // Broadcast to everyone
@@ -30,6 +30,12 @@ io.on('connection', (socket) => {
     socket.on('deleteSet', (setName) => {
         questionBank = questionBank.filter(q => q.set !== setName);
         io.emit('updateQuestions', questionBank);
+    });
+
+    // Admin: Delete Specific Results Folder
+    socket.on('deleteResultsFolder', (folderName) => {
+        delete studentResults[folderName];
+        io.emit('updateResults', studentResults);
     });
 
     // Student: Submit Exam
