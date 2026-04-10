@@ -100,7 +100,8 @@
                 <div>
                     <h3>Update Assessments</h3>
                     <input id="qSetName" placeholder="Assessment Name">
-                    <input id="qSetPass" placeholder="Admin PIN (Locked)" readonly style="opacity: 0.6;">
+                    <input id="qExamPass" placeholder="Student Access Password (e.g. ScienceQuiz1)">
+                    <input id="qSetPass" placeholder="Admin PIN (Logged In)" readonly style="opacity: 0.6;">
                     <input id="qSetTime" type="number" placeholder="Time Limit (Minutes)" value="30">
                     <textarea id="qText" rows="2" placeholder="Question Text or Imgur Link"></textarea>
                     <textarea id="qOptions" rows="3" placeholder="Choices (one per line)"></textarea>
@@ -162,7 +163,7 @@
     let timerInterval, timeLeft, startClock;
     let userChoices = {};
     let activeFolder = "";
-    let currentLockedPass = ""; 
+    let currentLockedAdminPin = ""; 
 
     // ADD YOUR ADMIN PASSWORDS HERE
     const MASTER_ADMIN_PASSWORDS = ["1234", "Science7", "AdminAdmin", "Tick2026"];
@@ -170,17 +171,17 @@
     socket.on('initData', (data) => {
         questionBank = data.questionBank;
         savedRecords = data.studentResults;
-        if(currentLockedPass) { renderAdminSets(); renderFolderList(); }
+        if(currentLockedAdminPin) { renderAdminSets(); renderFolderList(); }
     });
 
     socket.on('updateQuestions', (data) => {
         questionBank = data;
-        if(currentLockedPass) renderAdminSets();
+        if(currentLockedAdminPin) renderAdminSets();
     });
 
     socket.on('updateResults', (data) => {
         savedRecords = data;
-        if(currentLockedPass) {
+        if(currentLockedAdminPin) {
             renderFolderList();
             if (activeFolder) loadFolder(activeFolder);
         }
@@ -193,15 +194,18 @@
 
         if (!pass) return alert("Password required.");
 
-        // ADMIN LOGIN: Name must be empty, Password must be in Master List
+        // ADMIN LOGIN
         if (!name) {
             if (MASTER_ADMIN_PASSWORDS.includes(pass)) {
-                currentLockedPass = pass;
+                currentLockedAdminPin = pass;
                 document.getElementById('qSetPass').value = pass;
                 
-                // Auto-fill existing set name if this admin already has questions
-                const existingSet = questionBank.find(q => q.pass === pass);
-                if(existingSet) document.getElementById('qSetName').value = existingSet.set;
+                // Pre-fill fields if questions exist for this Admin
+                const existingSet = questionBank.find(q => q.adminPin === pass);
+                if(existingSet) {
+                    document.getElementById('qSetName').value = existingSet.set;
+                    document.getElementById('qExamPass').value = existingSet.pass;
+                }
                 
                 document.getElementById('adminTitle').innerText = `Admin Session: ${pass}`;
                 showView('editorView');
@@ -213,19 +217,21 @@
             return;
         }
 
-        // STUDENT LOGIN: Name + Section + Pass required. Pass must NOT be an Admin PIN.
+        // STUDENT LOGIN
         if (name && section) {
+            // Block students from using Master Admin PINs as exam passwords
             if (MASTER_ADMIN_PASSWORDS.includes(pass)) {
-                return alert("Access Denied: Admin PINs cannot be used to take exams.");
+                return alert("Access Denied: Use the specific Exam Password provided by your teacher.");
             }
 
+            // Find questions where the specific exam pass matches
             let set = questionBank.filter(q => q.pass === pass);
             if (set.length > 0) {
                 let setWithOriginalOrder = set.map((q, idx) => ({ ...q, originalIdx: idx + 1 }));
                 setWithOriginalOrder = shuffle(setWithOriginalOrder).map(q => ({ ...q, options: shuffle(q.options) }));
                 initiateExam(name, section, setWithOriginalOrder);
             } else {
-                alert("Wrong Exam Password.");
+                alert("Wrong Exam Password. Ask your teacher for the correct code.");
             }
         } else {
             alert("Enter Name and Section.");
@@ -233,7 +239,7 @@
     }
 
     function renderAdminSets() {
-        const myQuestions = questionBank.filter(q => q.pass === currentLockedPass);
+        const myQuestions = questionBank.filter(q => q.adminPin === currentLockedAdminPin);
         const setName = myQuestions.length > 0 ? myQuestions[0].set : "New Set";
 
         document.getElementById('activeSetsDisplay').innerHTML = `
@@ -243,7 +249,7 @@
                     ${myQuestions.map(q => `
                         <div style="border-bottom:1px solid #334155; padding:5px; position:relative;">
                             <button class="btn-danger" style="position:absolute; right:0; top:0;" onclick="socket.emit('deleteQuestion', ${q.id})">×</button>
-                            ${q.text}<br><small>Ans: ${q.ans}</small>
+                            ${q.text}<br><small>Ans: ${q.ans} | Code: ${q.pass}</small>
                         </div>
                     `).join('')}
                 </div>
@@ -251,10 +257,9 @@
     }
 
     function renderFolderList() {
-        const myQuestions = questionBank.filter(q => q.pass === currentLockedPass);
+        const myQuestions = questionBank.filter(q => q.adminPin === currentLockedAdminPin);
         const mySetName = myQuestions.length > 0 ? myQuestions[0].set : "___";
         
-        // Only show folders that belong to this Admin's Assessment Name
         let folders = Object.keys(savedRecords).filter(f => f.includes(mySetName)).sort();
 
         document.getElementById('folderSidebar').innerHTML = folders.map(f => `
@@ -266,22 +271,24 @@
 
     function saveQuestion() {
         const set = document.getElementById('qSetName').value.trim();
-        const pass = currentLockedPass; 
+        const examPass = document.getElementById('qExamPass').value.trim(); // New Exam Pass
+        const adminPin = currentLockedAdminPin; 
         const timeLimit = parseInt(document.getElementById('qSetTime').value) || 30;
         const text = document.getElementById('qText').value.trim();
         const ans = document.getElementById('qAnswer').value.trim();
         const options = document.getElementById('qOptions').value.split('\n').filter(o => o.trim());
 
-        if (!set || !text || !ans) return alert("Fill all fields.");
+        if (!set || !examPass || !text || !ans) return alert("Fill Assessment Name, Exam Password, and Question fields.");
         
-        const qData = { id: Date.now(), set, pass, timeLimit, text, ans, options };
+        // Data object now stores BOTH admin identifier and student password
+        const qData = { id: Date.now(), set, pass: examPass, adminPin, timeLimit, text, ans, options };
         socket.emit('saveQuestion', qData);
         document.getElementById('qText').value = ""; document.getElementById('qAnswer').value = "";
     }
 
-    // --- SHARED CORE LOGIC ---
     function shuffle(array) { let arr = [...array]; for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; }
     function showView(id) { document.querySelectorAll('.app-container > div').forEach(d => d.classList.add('hidden')); document.getElementById(id).classList.remove('hidden'); }
+    
     function initiateExam(name, section, set) {
         goFullScreen();
         activeSession = { name, section, setName: set[0].set, questions: set, exits: 0 };
