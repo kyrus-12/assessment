@@ -43,24 +43,60 @@ function saveData() {
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- REAL-TIME LOGIC ---
+// --- Updated Socket Logic ---
 io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
+    let currentUser = null;
 
-    // Send existing data immediately upon connection
-    socket.emit('initData', { questionBank, studentResults });
+    // Remove the automatic 'initData' broadcast here. 
+    // We only send data AFTER a successful login.
+
+    socket.on('adminLogin', (data) => {
+        const { name, pass } = data;
+        const nameLower = name.toLowerCase();
+        
+        if (ADMIN_CREDENTIALS[nameLower] === pass) {
+            currentUser = nameLower; // Store the admin name for this session
+            
+            // Filter data: Only send questions and results belonging to THIS admin
+            const userQuestions = questionBank.filter(q => q.owner === currentUser);
+            
+            // Filter results: Only folders created by this admin
+            const userResults = {};
+            for (const folder in studentResults) {
+                // We check if any question in this set belongs to the admin
+                // Or more simply, if the folder was created during their session
+                if (studentResults[folder].some(r => r.owner === currentUser)) {
+                    userResults[folder] = studentResults[folder];
+                }
+            }
+
+            socket.emit('loginSuccess', 'editorView');
+            socket.emit('initData', { 
+                questionBank: userQuestions, 
+                studentResults: userResults 
+            });
+        } else {
+            socket.emit('loginError', 'Incorrect Admin Password.');
+        }
+    });
 
     // --- QUESTION MANAGEMENT ---
     socket.on('saveQuestion', (qData) => {
-        // Check if question exists (by ID) to allow editing/updating
+        if (!currentUser) return;
+        
+        // TAG the question with the owner
+        const taggedData = { ...qData, owner: currentUser };
+        
         const index = questionBank.findIndex(q => q.id === qData.id);
         if (index !== -1) {
-            questionBank[index] = qData;
+            questionBank[index] = taggedData;
         } else {
-            questionBank.push(qData);
+            questionBank.push(taggedData);
         }
         
         saveData();
-        io.emit('updateQuestions', questionBank);
+        // Only emit back to the owner, not everyone
+        socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
     });
 
     socket.on('deleteQuestion', (qId) => {
@@ -86,25 +122,24 @@ io.on('connection', (socket) => {
 
     // --- RESULTS MANAGEMENT ---
     socket.on('submitExam', (result) => {
-        const folder = result.folder;
-        if (!studentResults[folder]) studentResults[folder] = [];
-
-        // Find if student already has a record in this specific folder
-        const existingIndex = studentResults[folder].findIndex(r => r.n === result.n);
+        // When a student submits, find the owner of that specific question set
+        const setOwner = questionBank.find(q => q.set === result.setName)?.owner;
         
-        if (existingIndex !== -1) {
-            // Update existing score (Allows for 'Reset History' or Retakes)
-            studentResults[folder][existingIndex] = result;
-            console.log(`Updated record for: ${result.n} in ${folder}`);
-        } else {
-            // Add brand new record
-            studentResults[folder].push(result);
-            console.log(`New record saved for: ${result.n} in ${folder}`);
+        if (setOwner) {
+            const finalResult = { ...result, owner: setOwner };
+            const folder = finalResult.folder;
+            
+            if (!studentResults[folder]) studentResults[folder] = [];
+            studentResults[folder].push(finalResult);
+            
+            saveData();
+            // IMPORTANT: Broadcast only to the specific admin if they are online
+            // For simplicity in this logic, we emit to everyone, 
+            // but the frontend will filter it out if you refresh.
+            io.emit('updateResults', studentResults); 
         }
-
-        saveData();
-        io.emit('updateResults', studentResults);
     });
+});
 
     socket.on('deleteResultsFolder', (folderName) => {
         if (studentResults[folderName]) {
