@@ -39,7 +39,6 @@
 
         #fs-overlay { position: fixed; inset: 0; background: var(--error); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 20px; }
         
-        /* History Styles */
         .history-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid var(--border); }
         .review-item { text-align: left; border-bottom: 1px solid var(--border); padding: 10px 0; margin-bottom: 10px; font-size: 0.9rem; }
         .review-correct { color: var(--success); font-weight: 600; }
@@ -67,7 +66,10 @@
 
     <div id="historyView" class="hidden">
         <div class="glass-card">
-            <h2>Your Exam History</h2>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2>Your Exam History</h2>
+                <button class="btn btn-danger" style="padding: 5px 10px; font-size: 0.8rem;" onclick="clearHistory()">Reset History</button>
+            </div>
             <div id="historyList"></div>
             <button class="btn btn-outline" style="width:100%; margin-top: 20px;" onclick="showView('setupView')">Back to Login</button>
         </div>
@@ -122,9 +124,10 @@
                     <h3 id="viewingSetLabel">Select a set</h3>
                     <table class="analytics-table">
                         <thead><tr>
-                            <th style="width:25%">Name</th>
-                            <th style="width:15%">Score</th>
-                            <th style="width:30%">Wrong (Q#)</th>
+                            <th style="width:20%">Name</th>
+                            <th style="width:15%">Correct</th>
+                            <th style="width:15%">Wrong</th>
+                            <th style="width:20%">Score %</th>
                             <th style="width:15%">Time</th>
                             <th style="width:15%">Exits</th>
                         </tr></thead>
@@ -141,10 +144,11 @@
             <h2 id="resScoreText" style="font-size:4rem; color:var(--accent);">0%</h2>
             <p id="resStudentName" style="font-size: 1.5rem; font-weight: bold;"></p>
             <p id="resSetNameText" style="color: var(--text-dim);"></p>
+            <p id="resDetailedScore" style="font-family: 'JetBrains Mono';"></p>
             <p id="resTimestamp" style="font-size: 0.8rem; color: var(--border);"></p>
             
             <div id="itemReviewArea" style="margin-top: 20px; max-height: 400px; overflow-y: auto; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px;">
-                </div>
+            </div>
 
             <hr style="border-color: var(--border); margin: 20px 0;">
             <button class="btn btn-primary" onclick="downloadReceipt()">Download Certificate</button>
@@ -272,16 +276,19 @@
             
             reviewData.push({
                 qText: q.text,
+                options: q.options,
                 uAns: userAns,
                 cAns: q.ans,
                 correct: isCorrect
             });
         });
         
-        const scorePercent = Math.round((score/activeSession.questions.length)*100);
+        const total = activeSession.questions.length;
+        const scorePercent = Math.round((score/total)*100);
         const final = { 
             n: activeSession.name, 
-            s: `${score}/${activeSession.questions.length}`, 
+            s: `${score}/${total}`,
+            w: `${total - score}/${total}`,
             sp: scorePercent + "%",
             t: `${Math.floor(elapsed/60)}m ${elapsed%60}s`, 
             e: activeSession.exits, 
@@ -302,11 +309,13 @@
         document.getElementById('resScoreText').innerText = data.sp;
         document.getElementById('resStudentName').innerText = data.n;
         document.getElementById('resSetNameText').innerText = data.folder;
+        document.getElementById('resDetailedScore').innerText = `Correct: ${data.s} | Wrong: ${data.w}`;
         document.getElementById('resTimestamp').innerText = data.date;
         
         const reviewHtml = data.review.map((item, idx) => `
             <div class="review-item">
                 <b>Q${idx+1}: ${item.qText}</b><br>
+                <small style="color:var(--text-dim)">Options: ${item.options.join(', ')}</small><br>
                 Your Answer: <span class="${item.correct ? 'review-correct' : 'review-wrong'}">${item.uAns}</span><br>
                 ${!item.correct ? `<span class="review-correct">Correct Answer: ${item.cAns}</span>` : ''}
             </div>
@@ -328,7 +337,7 @@
             <div class="history-item">
                 <div>
                     <b>${h.folder}</b><br>
-                    <small>${h.date}</small>
+                    <small>${h.date} | Score: ${h.s}</small>
                 </div>
                 <div style="text-align:right">
                     <span style="color:var(--accent); font-weight:bold;">${h.sp}</span><br>
@@ -336,6 +345,13 @@
                 </div>
             </div>
         `).join('');
+    }
+
+    function clearHistory() {
+        if(confirm("Are you sure you want to clear your local history?")) {
+            localStorage.removeItem('exam_history');
+            showHistory();
+        }
     }
 
     function reprintCertificate(data) {
@@ -367,7 +383,8 @@
                     <b>${s} (${qs[0].timeLimit}m | Pass: ${qs[0].pass})</b>
                     <button class="btn-danger" style="float:right; padding:2px 8px; font-size: 10px;" onclick="socket.emit('deleteSet', '${s}')">Delete Set</button>
                     <div style="margin-top:10px;">
-                        ${qs.map(q => `<div style="margin-bottom:10px; border-bottom:1px solid #334155; padding-bottom:5px;">
+                        ${qs.map(q => `<div style="margin-bottom:10px; border-bottom:1px solid #334155; padding-bottom:5px; position:relative;">
+                            <button class="btn-danger" style="position:absolute; right:0; top:0; padding:2px 5px; font-size:9px;" onclick="socket.emit('deleteQuestion', ${q.id})">Remove</button>
                             ${parseText(q.text)}<br>
                             <small style="color:var(--text-dim)">${q.options.join(' | ')}</small><br>
                             <span class="admin-correct-highlight">Correct Answer: ${q.ans}</span>
@@ -409,8 +426,9 @@
         document.getElementById('recordsTableBody').innerHTML = sorted.map(r => `
             <tr>
                 <td style="font-weight:bold; color:var(--accent)">${r.n}</td>
-                <td>${r.s}</td>
-                <td style="color:var(--text-dim)">${(r.w || "None")}</td>
+                <td style="color:var(--success)">${r.s}</td>
+                <td style="color:var(--error)">${r.w || '0'}</td>
+                <td>${r.sp}</td>
                 <td>${r.t}</td>
                 <td style="color:${r.e > 0 ? 'var(--error)' : 'var(--success)'}">${r.e}</td>
             </tr>
@@ -423,7 +441,6 @@
     }
 
     function downloadReceipt() {
-        // Temporarily hide review for certificate download to keep it clean
         const review = document.getElementById('itemReviewArea');
         review.style.display = 'none';
         html2canvas(document.getElementById('receiptBox'), {backgroundColor:'#0b0f1a'}).then(canvas => {
