@@ -227,42 +227,60 @@
         }
     });
 
-    function handleAuth() {
-        const nameInput = document.getElementById('loginName').value.trim();
-        const section = document.getElementById('loginSection').value.trim();
-        const pass = document.getElementById('loginPass').value.trim();
-        
-        const nameLower = nameInput.toLowerCase();
+    // --- UPDATED AUTHENTICATION LOGIC ---
 
-        // 1. ADMIN CHECK
-        if (ADMIN_CREDENTIALS[nameLower]) { 
-            if (ADMIN_CREDENTIALS[nameLower] === pass) {
-                showView('editorView'); 
-                return; 
-            } else {
-                alert("Incorrect Admin Password.");
-                return;
-            }
+function handleAuth() {
+    const nameInput = document.getElementById('loginName').value.trim();
+    const section = document.getElementById('loginSection').value.trim();
+    const pass = document.getElementById('loginPass').value.trim();
+    const nameLower = nameInput.toLowerCase();
+
+    // 1. ADMIN CHECK (Delegates to server for data isolation)
+    if (ADMIN_CREDENTIALS[nameLower]) {
+        if (pass === "") {
+            alert("Please enter your Admin PIN.");
+            return;
         }
-        
-        // 2. STUDENT CHECK
-        if (nameInput && section && pass) {
-            let set = questionBank.filter(q => q.pass === pass);
-            
-            if (set.length > 0) {
-                let setWithOriginalOrder = set.map((q, idx) => ({ ...q, originalIdx: idx + 1 }));
-                setWithOriginalOrder = shuffle(setWithOriginalOrder).map(q => ({ 
-                    ...q, 
-                    options: shuffle(q.options) 
-                }));
-                initiateExam(nameInput, section, setWithOriginalOrder);
-            } else {
-                alert("Exam not found or wrong password.");
-            }
-        } else {
-            alert("Please fill in Name, Section, and Password.");
-        }
+        // Instead of local showView, we verify with server to get ONLY this admin's data
+        socket.emit('adminLogin', { name: nameInput, pass: pass });
+        return; 
     }
+
+    // 2. STUDENT CHECK (Remains local for exam access)
+    if (nameInput && section && pass) {
+        // Filter questions by the specific exam password entered
+        let set = questionBank.filter(q => q.pass === pass);
+
+        if (set.length > 0) {
+            // Map original indices before shuffling for accurate review later
+            let setWithOriginalOrder = set.map((q, idx) => ({ ...q, originalIdx: idx + 1 }));
+            
+            // Shuffle both the question order and the options within each question
+            setWithOriginalOrder = shuffle(setWithOriginalOrder).map(q => ({
+                ...q,
+                options: shuffle(q.options)
+            }));
+            
+            initiateExam(nameInput, section, setWithOriginalOrder);
+        } else {
+            alert("Exam not found or wrong password.");
+        }
+    } else {
+        alert("Please fill in Name, Section, and Password.");
+    }
+}
+
+// --- SERVER RESPONSE LISTENERS ---
+
+// Triggered when the server verifies admin credentials and sends filtered data
+socket.on('loginSuccess', (viewId) => {
+    showView(viewId);
+});
+
+// Triggered if the admin PIN is incorrect on the server side
+socket.on('loginError', (msg) => {
+    alert(msg);
+});
 
     function initiateExam(name, section, set) {
         goFullScreen();
