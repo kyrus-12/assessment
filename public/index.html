@@ -190,7 +190,8 @@
     socket.on('initData', (data) => {
         questionBank = data.questionBank;
         savedRecords = data.studentResults;
-        renderAdminSets();
+        renderAdminSets();  // Displays the sets in the Designer view
+        renderFolderList(); // Displays the folders in the Results view
     });
 
     socket.on('updateQuestions', (data) => {
