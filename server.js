@@ -13,7 +13,7 @@ const io = new Server(server, {
 const DB_PATH = path.join(__dirname, 'questionBank.json');
 const RESULTS_PATH = path.join(__dirname, 'studentResults.json');
 
-// Initialize files with empty defaults if missing to prevent crash
+// Initialize files with empty defaults if missing
 if (!fs.existsSync(DB_PATH)) fs.writeFileSync(DB_PATH, JSON.stringify([]));
 if (!fs.existsSync(RESULTS_PATH)) fs.writeFileSync(RESULTS_PATH, JSON.stringify({}));
 
@@ -22,7 +22,6 @@ let studentResults = JSON.parse(fs.readFileSync(RESULTS_PATH));
 
 function saveData() {
     try {
-        // Atomic-like writing to prevent file corruption during simultaneous requests
         fs.writeFileSync(DB_PATH, JSON.stringify(questionBank, null, 2));
         fs.writeFileSync(RESULTS_PATH, JSON.stringify(studentResults, null, 2));
     } catch (err) {
@@ -35,12 +34,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    // Immediate sync
+    // Initial data sync
     socket.emit('initData', { questionBank, studentResults });
 
     // --- QUESTION MANAGEMENT ---
     socket.on('saveQuestion', (qData) => {
-        // FIX: Check if question exists (by ID) to allow editing instead of just duplicating
+        // qData now includes adminPin AND pass (exam password)
         const index = questionBank.findIndex(q => q.id === qData.id);
         if (index !== -1) {
             questionBank[index] = qData;
@@ -58,32 +57,30 @@ io.on('connection', (socket) => {
         io.emit('updateQuestions', questionBank);
     });
 
-    socket.on('deleteSet', ({ setName, pass }) => {
-    // Only delete the set if BOTH the name and the admin password match
-    questionBank = questionBank.filter(q => !(q.set === setName && q.pass === pass));
-    saveData();
-    io.emit('updateQuestions', questionBank);
-});
+    // FIXED: Uses adminPin to ensure only the owner can delete the set
+    socket.on('deleteSet', ({ setName, adminPin }) => {
+        questionBank = questionBank.filter(q => !(q.set === setName && q.adminPin === adminPin));
+        saveData();
+        io.emit('updateQuestions', questionBank);
+    });
 
     // --- RESULTS MANAGEMENT ---
     socket.on('submitExam', (result) => {
-    const folder = result.folder;
-    if (!studentResults[folder]) studentResults[folder] = [];
+        const folder = result.folder;
+        if (!studentResults[folder]) studentResults[folder] = [];
 
-    // Find if the student already has a record in this folder
-    const existingIndex = studentResults[folder].findIndex(r => r.n === result.n);
-    
-    if (existingIndex !== -1) {
-        // Overwrite existing record (Update mode)
-        studentResults[folder][existingIndex] = result;
-    } else {
-        // Add new record
-        studentResults[folder].push(result);
-    }
-    
-    saveData();
-    io.emit('updateResults', studentResults);
-});
+        // Check if student already has a record in this specific folder
+        const existingIndex = studentResults[folder].findIndex(r => r.n === result.n);
+        
+        if (existingIndex !== -1) {
+            studentResults[folder][existingIndex] = result;
+        } else {
+            studentResults[folder].push(result);
+        }
+        
+        saveData();
+        io.emit('updateResults', studentResults);
+    });
 
     socket.on('deleteResultsFolder', (folderName) => {
         if (studentResults[folderName]) {
@@ -101,4 +98,4 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`AIGHAM Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`TEIL Server running on port ${PORT}`));
