@@ -178,7 +178,7 @@
     let userChoices = {};
     let activeFolder = "";
     let currentLockedPass = ""; // The "Key" for this browser session
-    const VALID_PASSWORDS = ["Admin123", "Science7", "TEIL2026", "GuestPass"];
+    const MASTER_ADMIN_PASSWORDS = ["Admin123", "Science7", "TEIL2026", "GuestPass"];
 
     socket.on('initData', (data) => {
         questionBank = data.questionBank;
@@ -204,35 +204,45 @@
         const section = document.getElementById('loginSection').value.trim();
         const pass = document.getElementById('loginPass').value.trim();
 
-        // Check if the entered password exists in our restricted list
-        if (!VALID_PASSWORDS.includes(pass)) {
-            return alert("Access Denied: Invalid Password.");
-        }
+        if (!pass) return alert("Password required.");
 
-        // ADMIN LOGIC: If no name is provided, login as Admin for THAT password
+        // --- ADMIN LOGIN LOGIC ---
+        // Access Editor if Name is empty AND password is in the Master List
         if (!name) {
-            currentLockedPass = pass;
-            document.getElementById('qSetPass').value = pass;
-            
-            const existingSet = questionBank.find(q => q.pass === pass);
-            if(existingSet) document.getElementById('qSetName').value = existingSet.set;
-            
-            document.getElementById('adminTitle').innerText = `Admin Access: ${pass}`;
-            showView('editorView');
-            renderAdminSets();
+            if (MASTER_ADMIN_PASSWORDS.includes(pass)) {
+                currentLockedPass = pass;
+                document.getElementById('qSetPass').value = pass;
+                
+                const existingSet = questionBank.find(q => q.pass === pass);
+                if(existingSet) document.getElementById('qSetName').value = existingSet.set;
+                
+                document.getElementById('adminTitle').innerText = `Admin Access: ${pass}`;
+                showView('editorView');
+                renderAdminSets();
+            } else {
+                alert("Invalid Admin Password.");
+            }
             return;
         }
 
-        // STUDENT LOGIC
-        if (name && section && pass) {
+        // --- STUDENT LOGIN LOGIC ---
+        if (name && section) {
+            // 1. Prevent students from using Admin passwords to "guess" exams
+            if (MASTER_ADMIN_PASSWORDS.includes(pass)) {
+                return alert("Access Denied: Admin passwords cannot be used to take exams.");
+            }
+
+            // 2. Check if the password matches a created exam in the database
             let set = questionBank.filter(q => q.pass === pass);
             if (set.length > 0) {
                 let setWithOriginalOrder = set.map((q, idx) => ({ ...q, originalIdx: idx + 1 }));
                 setWithOriginalOrder = shuffle(setWithOriginalOrder).map(q => ({ ...q, options: shuffle(q.options) }));
                 initiateExam(name, section, setWithOriginalOrder);
             } else {
-                alert("This assessment is not yet active or has no questions.");
+                alert("Incorrect Exam Password or Exam not found.");
             }
+        } else {
+            alert("Please enter your Full Name and Section.");
         }
     }
 
