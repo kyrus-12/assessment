@@ -11,6 +11,7 @@ const io = new Server(server);
 let questionBank = [];
 let studentResults = {}; // Organized by Folder/SetName
 
+// Serve static files from the 'public' folder
 app.use(express.static(path.join(__dirname, 'public')));
 
 io.on('connection', (socket) => {
@@ -46,6 +47,11 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('User disconnected');
     });
+});
+
+// ROUTE: Direct home request to index.html
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
