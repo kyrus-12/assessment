@@ -181,6 +181,7 @@
     let timerInterval, timeLeft, startClock;
     let userChoices = {};
     let activeFolder = "";
+    let currentAdminRole = "SUPER"; // "SUPER" or "SECTION_ONLY"
 
     socket.on('initData', (data) => {
         questionBank = data.questionBank;
@@ -226,20 +227,38 @@
         const section = document.getElementById('loginSection').value.trim();
         const pass = document.getElementById('loginPass').value.trim();
         
-        // Admin Login
-        if (!name && pass === "1234") { showView('editorView'); return; }
+        // 1. SUPER ADMIN LOGIN (Full Access)
+        if (!name && pass === "1234") { 
+            currentAdminRole = "SUPER";
+            showView('editorView'); 
+            return; 
+        }
         
-        // Student Login
+        // 2. SECTION-BASED ADMIN LOGIN (Access records for a specific password)
+        if (!name && pass !== "") {
+            const linkedSet = questionBank.find(q => q.pass === pass);
+            if (linkedSet) {
+                currentAdminRole = "SECTION_ONLY";
+                activeFolder = ""; // Reset folder view
+                openRecords(); // Jump straight to results
+                alert(`Logged in as Admin for: ${linkedSet.set}`);
+                return;
+            }
+        }
+        
+        // 3. STUDENT LOGIN
         if (name && section && pass) {
             let set = questionBank.filter(q => q.pass === pass);
             if (set.length > 0) {
-                // Attach original index to keep track of item numbers during shuffle
                 let setWithOriginalOrder = set.map((q, idx) => ({ ...q, originalIdx: idx + 1 }));
                 setWithOriginalOrder = shuffle(setWithOriginalOrder).map(q => ({ ...q, options: shuffle(q.options) }));
                 initiateExam(name, section, setWithOriginalOrder);
+            } else {
+                alert("Exam password incorrect.");
             }
-            else alert("Exam not found or wrong password.");
-        } else alert("Please fill in Name, Section, and Password.");
+        } else {
+            alert("Enter Name/Section to take exam, or just Password for Admin access.");
+        }
     }
 
     function initiateExam(name, section, set) {
@@ -355,11 +374,20 @@
     }
 
     function renderFolderList() {
-        const folders = Object.keys(savedRecords).sort();
+        let folders = Object.keys(savedRecords).sort();
+        const loginPass = document.getElementById('loginPass').value.trim();
+
+        // If Section-Only Admin, only show folders matching their password's Set Name
+        if (currentAdminRole === "SECTION_ONLY") {
+            const linkedSet = questionBank.find(q => q.pass === loginPass);
+            const setName = linkedSet ? linkedSet.set : "";
+            folders = folders.filter(f => f.includes(setName));
+        }
+
         document.getElementById('folderSidebar').innerHTML = folders.map(f => `
             <div class="folder-wrapper">
                 <button class="folder-btn" onclick="loadFolder('${f}')">📁 ${f}</button>
-                <button class="btn btn-danger" style="padding: 10px;" onclick="deleteResultsFolder('${f}')">🗑️</button>
+                ${currentAdminRole === "SUPER" ? `<button class="btn btn-danger" style="padding: 10px;" onclick="deleteResultsFolder('${f}')">🗑️</button>` : ''}
             </div>
         `).join('');
     }
