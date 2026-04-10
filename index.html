@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TEIL Assessment Pro | Real-Time</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        :root {
+            --primary: #6366f1; --bg: #0b0f1a; --card: #1e293b;
+            --text-main: #f8fafc; --text-dim: #94a3b8; --accent: #22d3ee;
+            --success: #10b981; --error: #ef4444; --border: #334155;
+        }
+        body { margin: 0; font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text-main); }
+        .app-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .hidden { display: none !important; }
+        .glass-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+        .btn { padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; border: none; transition: 0.2s; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-danger { background: var(--error); color: white; }
+        .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
+        input, select, textarea { background: #0f172a; border: 1px solid var(--border); border-radius: 6px; color: white; padding: 12px; width: 100%; margin-bottom: 12px; box-sizing: border-box; }
+        .analytics-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .analytics-table th { background: rgba(255,255,255,0.05); text-align: left; padding: 12px; color: var(--accent); border-bottom: 2px solid var(--border); }
+        .analytics-table td { padding: 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+        .option-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; }
+        .option-card { background: rgba(255,255,255,0.03); border: 1px solid var(--border); padding: 15px; border-radius: 10px; cursor: pointer; }
+        .option-card.selected { border-color: var(--accent); background: rgba(34, 211, 238, 0.1); }
+        .folder-btn { display: block; width: 100%; text-align: left; padding: 12px; background: #0f172a; margin-bottom: 8px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; color: var(--accent); font-weight: 600; }
+        .admin-q-item { background: rgba(0,0,0,0.2); padding: 15px; border-radius: 6px; margin-bottom: 12px; border: 1px solid var(--border); }
+        .admin-choices-list { font-size: 0.8rem; color: var(--text-dim); margin: 8px 0; }
+        .admin-correct-ans { font-size: 0.8rem; color: var(--success); font-weight: bold; border-top: 1px solid var(--border); padding-top: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <div id="setupView">
+        <div class="glass-card" style="max-width: 400px; margin: 80px auto; text-align: center;">
+            <h2 style="color:var(--accent)">TEIL Real-Time Portal</h2>
+            <input id="loginName" placeholder="Full Name (Leave blank for Admin)">
+            <input id="loginPass" type="password" placeholder="Password or PIN">
+            <button class="btn btn-primary" style="width:100%" onclick="handleAuth()">Access System</button>
+        </div>
+    </div>
+
+    <div id="editorView" class="hidden">
+        <div class="glass-card">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2>Real-Time Designer</h2>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-outline" onclick="openRecords()">Live Results</button>
+                    <button class="btn btn-danger" onclick="location.reload()">Log Out</button>
+                </div>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:30px; margin-top:20px;">
+                <div>
+                    <h3>Create Questions</h3>
+                    <input id="qSetName" placeholder="Set Name">
+                    <input id="qSetPass" placeholder="Set Password">
+                    <textarea id="qText" rows="2" placeholder="Question Text"></textarea>
+                    <textarea id="qOptions" rows="3" placeholder="Choices (one per line)"></textarea>
+                    <input id="qAnswer" placeholder="Correct Answer">
+                    <button class="btn btn-primary" style="width:100%" onclick="saveQuestion()">Broadcast Question</button>
+                </div>
+                <div>
+                    <h3>Live Question Sets</h3>
+                    <div id="activeSetsDisplay"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="examView" class="hidden">
+        <div class="glass-card" style="position:sticky; top:10px; z-index:100; display:flex; justify-content:space-between; align-items:center;">
+            <div><b id="dispStudentName"></b> | <span id="dispSetName"></span></div>
+            <div id="timer" style="font-size:1.6rem; color:var(--error); font-family:'JetBrains Mono'; font-weight:bold;">30:00</div>
+        </div>
+        <div id="renderArea"></div>
+        <button class="btn btn-primary" style="width:100%; padding:20px;" onclick="submitExam()">Submit Final Answers</button>
+    </div>
+
+    <div id="analyticsView" class="hidden">
+        <div class="glass-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h2>Live Student Records</h2>
+                <button class="btn btn-outline" onclick="showView('editorView')">Back to Designer</button>
+            </div>
+            <div style="display:grid; grid-template-columns: 280px 1fr; gap:20px;">
+                <div id="folderSidebar" style="border-right: 1px solid var(--border); padding-right:15px;"></div>
+                <div>
+                    <h3 id="viewingSetLabel">Select a set</h3>
+                    <table class="analytics-table">
+                        <thead><tr><th>Name</th><th>Score</th><th>Wrong</th><th>Time</th><th>Exits</th></tr></thead>
+                        <tbody id="recordsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="resultsView" class="hidden">
+        <div id="receiptBox" class="glass-card" style="max-width:500px; margin:auto; text-align:center;">
+            <h1>Completed!</h1>
+            <h2 id="resScoreText" style="font-size:4rem; color:var(--accent);">0%</h2>
+            <p id="resStudentName"></p>
+            <button class="btn btn-primary" onclick="downloadReceipt()">Save Receipt</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    let questionBank = [];
+    let savedRecords = {};
+    let activeSession = null;
+    let timerInterval, timeLeft, startClock;
+    let userChoices = {};
+    let activeFolder = "";
+
+    // REAL-TIME SYNC
+    socket.on('initData', (data) => {
+        questionBank = data.questionBank;
+        savedRecords = data.studentResults;
+        renderAdminSets();
+    });
+
+    socket.on('updateQuestions', (data) => {
+        questionBank = data;
+        renderAdminSets();
+    });
+
+    socket.on('updateResults', (data) => {
+        savedRecords = data;
+        if (activeFolder) loadFolder(activeFolder);
+    });
+
+    function handleAuth() {
+        const name = document.getElementById('loginName').value.trim();
+        const pass = document.getElementById('loginPass').value.trim();
+        if (!name && pass === "1234") { showView('editorView'); return; }
+        if (name && pass) {
+            const set = questionBank.filter(q => q.pass === pass);
+            if (set.length > 0) initiateExam(name, set);
+            else alert("Exam not found or wrong password.");
+        } else alert("Fill details.");
+    }
+
+    function initiateExam(name, set) {
+        activeSession = { name, setName: set[0].set, questions: set, exits: 0 };
+        timeLeft = 30 * 60; startClock = Date.now();
+        document.getElementById('dispStudentName').innerText = name;
+        document.getElementById('dispSetName').innerText = activeSession.setName;
+        showView('examView'); renderQuiz();
+        timerInterval = setInterval(() => {
+            timeLeft--;
+            let m = Math.floor(timeLeft/60), s = timeLeft%60;
+            document.getElementById('timer').innerText = `${m}:${s<10?'0'+s:s}`;
+            if(timeLeft <= 0) submitExam();
+        }, 1000);
+        window.onblur = () => activeSession.exits++;
+    }
+
+    function renderQuiz() {
+        document.getElementById('renderArea').innerHTML = activeSession.questions.map((q, i) => `
+            <div class="glass-card">
+                <p><b>Q${i+1}:</b> ${q.text}</p>
+                <div class="option-grid">${q.options.map(o => `<div class="option-card" id="q${i}-${o.replace(/\s/g,'')}" onclick="selectOpt(${i}, '${o}')">${o}</div>`).join('')}</div>
+            </div>
+        `).join('');
+    }
+
+    function selectOpt(qi, val) {
+        userChoices[qi] = val;
+        document.querySelectorAll(`[id^="q${qi}-"]`).forEach(el => el.classList.remove('selected'));
+        const targetId = `q${qi}-${val.replace(/\s/g,'')}`;
+        document.getElementById(targetId).classList.add('selected');
+    }
+
+    function submitExam() {
+        clearInterval(timerInterval);
+        const elapsed = Math.floor((Date.now() - startClock) / 1000);
+        let score = 0, wrong = [];
+        activeSession.questions.forEach((q, i) => {
+            if ((userChoices[i] || "").toLowerCase() === q.ans.toLowerCase()) score++;
+            else wrong.push(i + 1);
+        });
+        const final = { 
+            n: activeSession.name, 
+            s: `${score}/${activeSession.questions.length}`, 
+            w: wrong.join(', ') || 'None', 
+            t: `${Math.floor(elapsed/60)}m ${elapsed%60}s`, 
+            e: activeSession.exits, 
+            folder: activeSession.setName 
+        };
+        
+        socket.emit('submitExam', final); // Send to server real-time
+        document.getElementById('resScoreText').innerText = Math.round((score/activeSession.questions.length)*100) + "%";
+        document.getElementById('resStudentName').innerText = final.n;
+        showView('resultsView');
+    }
+
+    function saveQuestion() {
+        const set = document.getElementById('qSetName').value.trim();
+        const pass = document.getElementById('qSetPass').value.trim();
+        const text = document.getElementById('qText').value.trim();
+        const ans = document.getElementById('qAnswer').value.trim();
+        const options = document.getElementById('qOptions').value.split('\n').filter(o => o.trim());
+        
+        if (!set || !pass || !text || !ans) return alert("Missing info.");
+        
+        const qData = { id: Date.now(), set, pass, text, ans, options };
+        socket.emit('saveQuestion', qData); // Real-time broadcast
+        
+        document.getElementById('qText').value = ""; 
+        document.getElementById('qAnswer').value = ""; 
+        document.getElementById('qOptions').value = "";
+    }
+
+    function renderAdminSets() {
+        const sets = [...new Set(questionBank.map(q => q.set))];
+        document.getElementById('activeSetsDisplay').innerHTML = sets.map(s => {
+            const qs = questionBank.filter(q => q.set === s);
+            return `
+                <div class="glass-card" style="border-left: 4px solid var(--primary);">
+                    <b>${s} (Pass: ${qs[0].pass})</b>
+                    <button class="btn-danger" style="float:right; padding:2px 8px;" onclick="socket.emit('deleteSet', '${s}')">Delete</button>
+                    <div style="margin-top:10px;">
+                        ${qs.map(q => `<div class="admin-q-item">
+                            ${q.text}<br>
+                            <small class="admin-choices-list">${q.options.join(' | ')}</small><br>
+                            <span class="admin-correct-ans">Ans: ${q.ans}</span>
+                        </div>`).join('')}
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    function openRecords() {
+        showView('analyticsView');
+        const folders = Object.keys(savedRecords);
+        document.getElementById('folderSidebar').innerHTML = folders.map(f => `<button class="folder-btn" onclick="loadFolder('${f}')">📁 ${f}</button>`).join('');
+    }
+
+    function loadFolder(f) {
+        activeFolder = f;
+        document.getElementById('viewingSetLabel').innerText = "Live: " + f;
+        document.getElementById('recordsTableBody').innerHTML = (savedRecords[f] || []).map(r => `<tr><td>${r.n}</td><td>${r.s}</td><td>${r.w}</td><td>${r.t}</td><td>${r.e}</td></tr>`).join('');
+    }
+
+    function showView(id) {
+        document.querySelectorAll('.app-container > div').forEach(d => d.classList.add('hidden'));
+        document.getElementById(id).classList.remove('hidden');
+    }
+
+    function downloadReceipt() {
+        html2canvas(document.getElementById('receiptBox'), {backgroundColor:'#0b0f1a'}).then(canvas => {
+            let link = document.createElement('a');
+            link.download = 'Result.png'; link.href = canvas.toDataURL(); link.click();
+        });
+    }
+</script>
+</body>
+</html>
