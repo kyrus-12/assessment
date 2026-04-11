@@ -16,16 +16,25 @@ const ADMIN_CREDENTIALS = {
     "john": "renz2026"
 };
 
-const DB_PATH = path.join(__dirname, 'questionBank.json');
-const RESULTS_PATH = path.join(__dirname, 'studentResults.json');
+// Use an absolute path to ensure the server looks in the right place
+const DB_PATH = path.resolve(__dirname, 'questionBank.json');
+const RESULTS_PATH = path.resolve(__dirname, 'studentResults.json');
 
 function loadJSON(filePath, defaultValue) {
     try {
         if (fs.existsSync(filePath)) {
-            return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            const data = fs.readFileSync(filePath, 'utf8');
+            console.log(`[SYSTEM] Loaded data from ${filePath}`);
+            return JSON.parse(data);
+        } else {
+            console.log(`[SYSTEM] ${filePath} not found. Creating new file.`);
+            fs.writeFileSync(filePath, JSON.stringify(defaultValue));
+            return defaultValue;
         }
-    } catch (err) { console.error(`Error loading ${filePath}:`, err); }
-    return defaultValue;
+    } catch (err) { 
+        console.error(`[CRITICAL] Error loading ${filePath}:`, err); 
+        return defaultValue;
+    }
 }
 
 let questionBank = loadJSON(DB_PATH, []);
@@ -33,9 +42,16 @@ let studentResults = loadJSON(RESULTS_PATH, {});
 
 function saveData() {
     try {
-        fs.writeFileSync(DB_PATH, JSON.stringify(questionBank, null, 2));
-        fs.writeFileSync(RESULTS_PATH, JSON.stringify(studentResults, null, 2));
-    } catch (err) { console.error("Save Error:", err); }
+        // We use synchronous write to ensure data hits the disk before the process can sleep
+        const qData = JSON.stringify(questionBank, null, 2);
+        const rData = JSON.stringify(studentResults, null, 2);
+        
+        fs.writeFileSync(DB_PATH, qData);
+        fs.writeFileSync(RESULTS_PATH, rData);
+        console.log(`[SYSTEM] Data successfully saved to disk at ${new Date().toLocaleTimeString()}`);
+    } catch (err) { 
+        console.error("[CRITICAL] Save Error:", err); 
+    }
 }
 
 app.use(express.static(path.join(__dirname, 'public')));
@@ -43,15 +59,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 io.on('connection', (socket) => {
     let currentUser = null;
 
-    // --- CRITICAL: FIX FOR STUDENT PASSWORDS ---
-    // When anyone (student or admin) connects, send the questionBank 
-    // so the frontend handleAuth() can filter by 'pass'.
+    // Send the latest bank to students/admins immediately
     socket.emit('initData', { 
         questionBank: questionBank, 
-        studentResults: {} // Keep results hidden until admin login
+        studentResults: {} 
     });
 
-    // Helper to get filtered results for a specific admin
     const getAdminResults = (adminName) => {
         const filtered = {};
         for (const folder in studentResults) {
@@ -71,14 +84,10 @@ io.on('connection', (socket) => {
             currentUser = nameLower;
             socket.join(`admin_${currentUser}`); 
             
-            const userQuestions = questionBank.filter(q => q.owner === currentUser);
-            const userResults = getAdminResults(currentUser);
-
             socket.emit('loginSuccess', 'editorView');
-            // Update the admin's view with their specific private data
             socket.emit('initData', { 
-                questionBank: userQuestions, 
-                studentResults: userResults 
+                questionBank: questionBank.filter(q => q.owner === currentUser), 
+                studentResults: getAdminResults(currentUser) 
             });
         } else {
             socket.emit('loginError', 'Incorrect PIN.');
@@ -93,23 +102,12 @@ io.on('connection', (socket) => {
         if (index !== -1) questionBank[index] = taggedData;
         else questionBank.push(taggedData);
         
-        saveData();
-        // Refresh admin's list
-        socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
-        // Refresh global list for students (so new exams are accessible immediately)
-        io.emit('refreshGlobalBank', questionBank);
-    });
-
-    socket.on('deleteQuestion', (qId) => {
-        if (!currentUser) return;
-        questionBank = questionBank.filter(q => q.id !== qId);
-        saveData();
+        saveData(); // Immediate save
         socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
         io.emit('refreshGlobalBank', questionBank);
     });
 
     socket.on('submitExam', (result) => {
-        // Find owner based on the set name
         const targetSetName = result.setName;
         const setOwner = questionBank.find(q => q.set === targetSetName)?.owner || "admin"; 
         
@@ -118,9 +116,8 @@ io.on('connection', (socket) => {
         
         if (!studentResults[folder]) studentResults[folder] = [];
         studentResults[folder].push(finalResult);
-        saveData();
-
-        // Notify the specific admin in real-time
+        
+        saveData(); // Immediate save
         io.to(`admin_${setOwner}`).emit('updateResults', getAdminResults(setOwner));
     });
 
@@ -134,8 +131,25 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('disconnect', () => {});
+    socket.on('deleteSet', (setName) => {
+        if (!currentUser) return;
+        questionBank = questionBank.filter(q => q.set !== setName);
+        saveData();
+        socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
+        io.emit('refreshGlobalBank', questionBank);
+    });
+
+    socket.on('deleteQuestion', (qId) => {
+        if (!currentUser) return;
+        questionBank = questionBank.filter(q => q.id !== qId);
+        saveData();
+        socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
+        io.emit('refreshGlobalBank', questionBank);
+    });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`AIGHAM Server active on port ${PORT}`));
+server.listen(PORT, () => {
+    console.log(`[AIGHAM] ACTIVE ON PORT ${PORT}`);
+    console.log(`[AIGHAM] Storage Paths: \n DB: ${DB_PATH} \n Results: ${RESULTS_PATH}`);
+});
