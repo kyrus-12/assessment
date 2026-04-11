@@ -16,25 +16,17 @@ const ADMIN_CREDENTIALS = {
     "john": "renz2026"
 };
 
-// Use an absolute path to ensure the server looks in the right place
-const DB_PATH = path.resolve(__dirname, 'questionBank.json');
-const RESULTS_PATH = path.resolve(__dirname, 'studentResults.json');
+const DB_PATH = path.join(__dirname, 'questionBank.json');
+const RESULTS_PATH = path.join(__dirname, 'studentResults.json');
 
 function loadJSON(filePath, defaultValue) {
     try {
         if (fs.existsSync(filePath)) {
             const data = fs.readFileSync(filePath, 'utf8');
-            console.log(`[SYSTEM] Loaded data from ${filePath}`);
-            return JSON.parse(data);
-        } else {
-            console.log(`[SYSTEM] ${filePath} not found. Creating new file.`);
-            fs.writeFileSync(filePath, JSON.stringify(defaultValue));
-            return defaultValue;
+            return data ? JSON.parse(data) : defaultValue;
         }
-    } catch (err) { 
-        console.error(`[CRITICAL] Error loading ${filePath}:`, err); 
-        return defaultValue;
-    }
+    } catch (err) { console.error(`Error loading ${filePath}:`, err); }
+    return defaultValue;
 }
 
 let questionBank = loadJSON(DB_PATH, []);
@@ -42,52 +34,52 @@ let studentResults = loadJSON(RESULTS_PATH, {});
 
 function saveData() {
     try {
-        // We use synchronous write to ensure data hits the disk before the process can sleep
-        const qData = JSON.stringify(questionBank, null, 2);
-        const rData = JSON.stringify(studentResults, null, 2);
-        
-        fs.writeFileSync(DB_PATH, qData);
-        fs.writeFileSync(RESULTS_PATH, rData);
-        console.log(`[SYSTEM] Data successfully saved to disk at ${new Date().toLocaleTimeString()}`);
-    } catch (err) { 
-        console.error("[CRITICAL] Save Error:", err); 
-    }
+        fs.writeFileSync(DB_PATH, JSON.stringify(questionBank, null, 2));
+        fs.writeFileSync(RESULTS_PATH, JSON.stringify(studentResults, null, 2));
+    } catch (err) { console.error("Save Error:", err); }
 }
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Helper to filter results for a specific admin
+const getAdminResults = (adminName) => {
+    const filtered = {};
+    for (const folder in studentResults) {
+        // Only include results belonging to this admin
+        const matches = studentResults[folder].filter(r => r.owner === adminName);
+        if (matches.length > 0) {
+            filtered[folder] = matches;
+        }
+    }
+    return filtered;
+};
+
 io.on('connection', (socket) => {
     let currentUser = null;
 
-    // Send the latest bank to students/admins immediately
+    // INITIAL CONNECTION (Student Mode)
+    // We send ONLY questions. studentResults is sent as an empty object for safety.
     socket.emit('initData', { 
         questionBank: questionBank, 
         studentResults: {} 
     });
 
-    const getAdminResults = (adminName) => {
-        const filtered = {};
-        for (const folder in studentResults) {
-            const matches = studentResults[folder].filter(r => r.owner === adminName);
-            if (matches.length > 0) {
-                filtered[folder] = matches;
-            }
-        }
-        return filtered;
-    };
-
     socket.on('adminLogin', (data) => {
         const { name, pass } = data;
-        const nameLower = name.toLowerCase();
+        const nameLower = name ? name.toLowerCase() : "";
         
-        if (ADMIN_CREDENTIALS[nameLower] === pass) {
+        if (ADMIN_CREDENTIALS[nameLower] && ADMIN_CREDENTIALS[nameLower] === pass) {
             currentUser = nameLower;
             socket.join(`admin_${currentUser}`); 
             
+            // Only send this specific admin's questions and results
+            const userQuestions = questionBank.filter(q => q.owner === currentUser);
+            const userResults = getAdminResults(currentUser);
+
             socket.emit('loginSuccess', 'editorView');
             socket.emit('initData', { 
-                questionBank: questionBank.filter(q => q.owner === currentUser), 
-                studentResults: getAdminResults(currentUser) 
+                questionBank: userQuestions, 
+                studentResults: userResults 
             });
         } else {
             socket.emit('loginError', 'Incorrect PIN.');
@@ -102,38 +94,6 @@ io.on('connection', (socket) => {
         if (index !== -1) questionBank[index] = taggedData;
         else questionBank.push(taggedData);
         
-        saveData(); // Immediate save
-        socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
-        io.emit('refreshGlobalBank', questionBank);
-    });
-
-    socket.on('submitExam', (result) => {
-        const targetSetName = result.setName;
-        const setOwner = questionBank.find(q => q.set === targetSetName)?.owner || "admin"; 
-        
-        const finalResult = { ...result, owner: setOwner };
-        const folder = finalResult.folder;
-        
-        if (!studentResults[folder]) studentResults[folder] = [];
-        studentResults[folder].push(finalResult);
-        
-        saveData(); // Immediate save
-        io.to(`admin_${setOwner}`).emit('updateResults', getAdminResults(setOwner));
-    });
-
-    socket.on('deleteResultsFolder', (folderName) => {
-        if (studentResults[folderName]) {
-            delete studentResults[folderName];
-            saveData();
-            if (currentUser) {
-                socket.emit('updateResults', getAdminResults(currentUser));
-            }
-        }
-    });
-
-    socket.on('deleteSet', (setName) => {
-        if (!currentUser) return;
-        questionBank = questionBank.filter(q => q.set !== setName);
         saveData();
         socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
         io.emit('refreshGlobalBank', questionBank);
@@ -146,10 +106,37 @@ io.on('connection', (socket) => {
         socket.emit('updateQuestions', questionBank.filter(q => q.owner === currentUser));
         io.emit('refreshGlobalBank', questionBank);
     });
+
+    socket.on('submitExam', (result) => {
+        // Find owner based on the set name from the global bank
+        const match = questionBank.find(q => q.set === result.setName);
+        const setOwner = match ? match.owner : "admin"; 
+        
+        const finalResult = { ...result, owner: setOwner };
+        const folder = finalResult.folder;
+        
+        if (!studentResults[folder]) studentResults[folder] = [];
+        studentResults[folder].push(finalResult);
+        saveData();
+
+        // Real-time update ONLY to the owner of this exam
+        io.to(`admin_${setOwner}`).emit('updateResults', getAdminResults(setOwner));
+    });
+
+    socket.on('deleteResultsFolder', (folderName) => {
+        if (!currentUser) return;
+        if (studentResults[folderName]) {
+            // Only delete records in that folder that belong to the current admin
+            studentResults[folderName] = studentResults[folderName].filter(r => r.owner !== currentUser);
+            
+            // If folder is now empty, remove it entirely
+            if (studentResults[folderName].length === 0) delete studentResults[folderName];
+            
+            saveData();
+            socket.emit('updateResults', getAdminResults(currentUser));
+        }
+    });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`[AIGHAM] ACTIVE ON PORT ${PORT}`);
-    console.log(`[AIGHAM] Storage Paths: \n DB: ${DB_PATH} \n Results: ${RESULTS_PATH}`);
-});
+server.listen(PORT, () => console.log(`Server active on port ${PORT}`));
